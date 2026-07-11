@@ -16,15 +16,19 @@ SERIAL_BAUDRATE = 115200
 SERIAL_TIMEOUT = 0.005
 UWB_PROBE_SECONDS = 0.8
 
-TARGET_DISTANCE = 70.0
-DISTANCE_DEADZONE = 10.0
-FORWARD_MIN = 0.10
-FORWARD_MAX = 0.22
+# 近距保持：人先站在目标附近（死区内零速），再慢慢拉远，比远距一起步满档更稳
+# 30cm 过近易蹭腿；推荐起步站 ~50cm，再往前走到 80–100cm 让它跟
+TARGET_DISTANCE = 50.0
+DISTANCE_DEADZONE = 12.0
+FORWARD_MIN = 0.08
+FORWARD_MAX = 0.18
 ROTATE_MIN = 0.10
-ROTATE_MAX = 0.16
+ROTATE_MAX = 0.14
 ANGLE_DEADZONE = 15.0
 ANGLE_SCALE = 70.0
-DISTANCE_SCALE = 130.0
+DISTANCE_SCALE = 120.0
+# 距离误差封顶：即使人在 1.5m 外，也按最多 +ERR_CAP 算前进，避免一起步顶满
+DISTANCE_ERR_CAP_CM = 35.0
 ANGLE_EMA_ALPHA = 0.22
 ANGLE_JUMP_REJECT_DEG = 30.0
 ANGLE_HOLD_ON_JUMP = True
@@ -32,6 +36,8 @@ TURN_FORWARD_COUPLING = 0.88
 # |ang| 大于此值时优先转向、前进再压一档（先转后走）
 TURN_FIRST_ANGLE_DEG = 25.0
 TURN_FIRST_FWD_SCALE = 0.35
+# False=只用距离前后（rot=0）；角度跳变曾导致边冲边拧摔倒
+USE_ANGLE = False
 SINGLE_PAIR = True
 UWB_TIMEOUT = 1.2
 
@@ -132,7 +138,12 @@ class FollowController:
     def calculate(self, data: UWBData) -> Tuple[float, float, str, float]:
         filt_ang = self.angle_filter.update(data.angle, data.is_anomaly)
         err = data.distance - TARGET_DISTANCE
-        if abs(err) < DISTANCE_DEADZONE:
+        # 远距时封顶误差，避免 1.5m 一起步就顶 FORWARD_MAX
+        if err > DISTANCE_ERR_CAP_CM:
+            err = DISTANCE_ERR_CAP_CM
+        elif err < -DISTANCE_ERR_CAP_CM:
+            err = -DISTANCE_ERR_CAP_CM
+        if abs(data.distance - TARGET_DISTANCE) < DISTANCE_DEADZONE:
             fwd = 0.0
             state = "KEEPING"
         else:
@@ -140,7 +151,15 @@ class FollowController:
             fwd = max(-FORWARD_MAX, min(FORWARD_MAX, raw))
             if abs(fwd) < FORWARD_MIN:
                 fwd = math.copysign(FORWARD_MIN, fwd)
-            state = "FOLLOW" if err > 0 else "BACK"
+            state = "FOLLOW" if (data.distance - TARGET_DISTANCE) > 0 else "BACK"
+
+        # 距离-only：不转向，避免角度噪声导致拧腰摔倒
+        if not USE_ANGLE:
+            if state == "KEEPING":
+                state = "ALIGNED"
+            else:
+                state = "DIST_ONLY"
+            return fwd, 0.0, state, filt_ang
 
         use_angle = (not data.is_anomaly) and (not self.angle_filter.last_rejected)
         if (not use_angle) or abs(filt_ang) < ANGLE_DEADZONE:
@@ -220,15 +239,11 @@ def try_open_serial(port: str) -> Optional[serial.Serial]:
 
 
 def find_uwb_port() -> Optional[str]:
+    """只返回探测到 ###1.9 的口；绝不回退到 IMU 等空口。"""
     candidates = _list_ttyusb_ports()
     if not candidates:
         return None
     for port in candidates:
         if _port_has_uwb_data(port):
-            return port
-    for port in candidates:
-        ser = try_open_serial(port)
-        if ser is not None:
-            ser.close()
             return port
     return None

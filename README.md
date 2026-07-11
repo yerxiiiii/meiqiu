@@ -5,7 +5,7 @@ UWB + 视觉感知 → 决策（brain）→ 运控（sim2real）。
 ## 先读
 
 - 决策与跟随注意：[`brain/README.md`](brain/README.md)（含 **使用注意**）
-- 运控策略 `amp_right_hold`：`/home/nvidia/sim2real_master-feature-master_and_slave/docs/AMP_RIGHT_HOLD.md`
+- 运控策略 `amp_right_hold`：[`docs/AMP_RIGHT_HOLD.md`](docs/AMP_RIGHT_HOLD.md)（配置见 `sim2real/config/`）
 
 ## 真机最短路径
 

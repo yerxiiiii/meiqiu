@@ -66,20 +66,21 @@ SERIAL_BAUDRATE = 115200
 SERIAL_TIMEOUT = 0.005
 SERIAL_RETRY_INTERVAL = 2.0  # 串口未找到时的重试间隔 (秒)
 
-# 跟随距离 (cm)
-TARGET_DISTANCE = 70.0
-DISTANCE_DEADZONE = 10.0
+# 跟随距离 (cm) —— 与 brain/uwb_intent 对齐
+TARGET_DISTANCE = 50.0
+DISTANCE_DEADZONE = 12.0
 
 # 摇杆输出限制 —— 与 brain/uwb_intent 对齐（日志摔倒主因：边冲边拧）
-FORWARD_MIN = 0.10
-FORWARD_MAX = 0.22
+FORWARD_MIN = 0.08
+FORWARD_MAX = 0.18
 ROTATE_MIN = 0.10
-ROTATE_MAX = 0.16
+ROTATE_MAX = 0.14
 
 # 角度与距离控制比例
 ANGLE_DEADZONE = 15.0
 ANGLE_SCALE = 70.0
-DISTANCE_SCALE = 130.0
+DISTANCE_SCALE = 120.0
+DISTANCE_ERR_CAP_CM = 35.0
 
 # 角度滤波 / 跳变抑制（日志里 ang 曾在 0.1s 内 -34→0→63）
 ANGLE_EMA_ALPHA = 0.22
@@ -90,6 +91,8 @@ ANGLE_HOLD_ON_JUMP = True
 TURN_FORWARD_COUPLING = 0.88
 TURN_FIRST_ANGLE_DEG = 25.0
 TURN_FIRST_FWD_SCALE = 0.35
+# False=只用距离前后（rot=0）
+USE_ANGLE = False
 
 # 信号超时
 UWB_TIMEOUT = 1.2      # 秒
@@ -305,7 +308,11 @@ class FollowController:
 
         # 前后
         err = data.distance - TARGET_DISTANCE
-        if abs(err) < DISTANCE_DEADZONE:
+        if err > DISTANCE_ERR_CAP_CM:
+            err = DISTANCE_ERR_CAP_CM
+        elif err < -DISTANCE_ERR_CAP_CM:
+            err = -DISTANCE_ERR_CAP_CM
+        if abs(data.distance - TARGET_DISTANCE) < DISTANCE_DEADZONE:
             fwd = 0.0
             state = "KEEPING"
         else:
@@ -313,7 +320,14 @@ class FollowController:
             fwd = max(-FORWARD_MAX, min(FORWARD_MAX, raw))
             if abs(fwd) < FORWARD_MIN:
                 fwd = math.copysign(FORWARD_MIN, fwd)
-            state = "FOLLOW" if err > 0 else "BACK"
+            state = "FOLLOW" if (data.distance - TARGET_DISTANCE) > 0 else "BACK"
+
+        if not USE_ANGLE:
+            if state == "KEEPING":
+                state = "ALIGNED"
+            else:
+                state = "DIST_ONLY"
+            return fwd, 0.0, state, filt_ang
 
         # 旋转
         use_angle = (not data.is_anomaly) and (not self.angle_filter.last_rejected)
@@ -391,7 +405,7 @@ def _port_has_uwb_data(port: str) -> bool:
 
 
 def find_uwb_port() -> Optional[str]:
-    """探测 UWB 主站串口：优先有 ###1.9 数据的口，否则返回可打开的候选口"""
+    """探测 UWB 主站串口：只返回有 ###1.9 的口（不回退到 IMU 等空口）"""
     candidates = _list_ttyusb_ports()
     if not candidates:
         return None
@@ -399,14 +413,6 @@ def find_uwb_port() -> Optional[str]:
     for port in candidates:
         if _port_has_uwb_data(port):
             print(f"\033[92m[DETECT]\033[0m 找到 UWB 主站数据口: {port} (672)")
-            return port
-
-    # 有口但暂时无包：仍返回优先候选，交给后续超时/热插拔逻辑
-    for port in candidates:
-        ser = try_open_serial(port)
-        if ser is not None:
-            ser.close()
-            print(f"\033[93m[DETECT]\033[0m 未读到 ###1.9，暂用候选口: {port}")
             return port
     return None
 

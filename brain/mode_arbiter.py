@@ -80,7 +80,9 @@ except ImportError:
     SimJoy = None
 
 CONTROL_HZ = 50.0
-SOFT_START_SEC = 5.0
+SOFT_START_SEC = 6.0
+# 进 RUNNING 后先原地零速踏步，再开始 soft 爬升（避免一起步叠速度）
+POST_RUNNING_HOLD_SEC = 2.5
 OBSTACLE_TIMEOUT = 0.8
 # 与 uwb_follow 对齐：先测跟随默认关门控；联调用 --enable-obstacle-gate
 ENABLE_OBSTACLE_GATE = False
@@ -90,6 +92,8 @@ AUTO_ENTER_RUNNING = True
 FOLLOW_WALK_POLICY = WALK_POLICY_FOLLOW
 ENTER_RUNNING_SETTLE_SEC = 1.6
 POLICY_SETTLE_SEC = 0.8
+# 误拨到 standby 后等站稳再二次 LB
+STANDBY_RECOVER_SEC = 2.0
 
 
 class ModeArbiter:
@@ -115,6 +119,7 @@ class ModeArbiter:
         self._motion_armed = False
         self._policy_ready = False
         self._soft_t0: Optional[float] = None
+        self._hold_until: Optional[float] = None  # 进 RUNNING 后零速截止时刻
         self._last_loop = time.time()
         self._print_i = 0
 
@@ -170,7 +175,9 @@ class ModeArbiter:
             self._motion_armed = False
             self._policy_ready = False
             self._soft_t0 = None
-            self.fsm.clear_running_hint()
+            self._hold_until = None
+            # 不 clear running_hint：stop 后机器人可能仍在 RUNNING；
+            # 下次进跟随靠 recover_running_from_log / 实时 rosout 判断，避免误点 LB
             if self._teleop_killed and not self.dry_run:
                 self._restore_teleop()
         if mode == Mode.FACE_LOOK:
@@ -315,6 +322,17 @@ class ModeArbiter:
             self._publish_legs(0.0, 0.0, lb=0.0, lt=0.0, rt=0.0)
             time.sleep(0.02)
 
+    def _arm_after_running(self) -> None:
+        """确认 RUNNING 后：先原地零速 hold，再开始 soft 爬升。"""
+        self._motion_armed = True
+        now = time.time()
+        self._hold_until = now + POST_RUNNING_HOLD_SEC
+        self._soft_t0 = self._hold_until  # soft 从 hold 结束后才计
+        print(
+            f"\033[93m[RUNNING]\033[0m 原地踏步 {POST_RUNNING_HOLD_SEC:.1f}s "
+            f"后再软启速度（{SOFT_START_SEC:.0f}s）"
+        )
+
     def _enter_running_pulse(self) -> bool:
         """
         确保运控在 RUNNING 再发跟随速度。
@@ -323,7 +341,7 @@ class ModeArbiter:
         必须以 rosout `switch to running` 为准，禁止 fsm=5 兜底武装。
         """
         if self.dry_run:
-            self._motion_armed = True
+            self._arm_after_running()
             return True
         if self.joy_pub is None:
             return False
@@ -333,10 +351,14 @@ class ModeArbiter:
             print(f"\033[91m[RUNNING]\033[0m fsm={fsm} 非可行走态，拒绝进 RUNNING")
             return False
 
+        # arbiter 重启后 hint 可能丢：先从 rosout 日志恢复
+        if not self.fsm.is_running():
+            self.fsm.recover_running_from_log()
+
         # 已在 RUNNING：勿再点 LB
         if self.fsm.is_running():
             print("\033[92m[RUNNING]\033[0m 已在 RUNNING，跳过 LB")
-            self._motion_armed = True
+            self._arm_after_running()
             return True
 
         def _try_once(tag: str) -> bool:
@@ -352,18 +374,19 @@ class ModeArbiter:
             if self.fsm.saw_standby_since(since):
                 print(
                     "\033[93m[RUNNING]\033[0m 本次 LB 落到 standby"
-                    "（多半是切换边沿未进 running）"
+                    "（多半原先已在 RUNNING，误拨出）—"
+                    f"等 {STANDBY_RECOVER_SEC:.1f}s 站稳再试"
                 )
+                time.sleep(STANDBY_RECOVER_SEC)
             return False
 
         if _try_once("第1次"):
-            self._motion_armed = True
+            self._arm_after_running()
             return True
 
-        # 再试一次（例如边沿被吞、或刚从 running 误拨出）
-        time.sleep(0.3)
+        # 再试一次（边沿被吞，或刚误拨到 standby 已站稳）
         if self.fsm.is_running() or _try_once("第2次"):
-            self._motion_armed = True
+            self._arm_after_running()
             return True
 
         print(
@@ -372,6 +395,7 @@ class ModeArbiter:
         )
         self._motion_armed = False
         return False
+
     def tick(self) -> None:
         now = time.time()
         dt = max(1e-3, min(0.2, now - self._last_loop))
@@ -482,15 +506,28 @@ class ModeArbiter:
                 if not self._enter_running_pulse():
                     self._abort_follow("未能进入 RUNNING")
                     return
-                self._soft_t0 = time.time()
 
             if not self._motion_armed and not self.dry_run:
                 self._publish_legs(0.0, 0.0)
                 return
 
+            # 进 RUNNING 后先原地零速，再 soft 爬升
+            if self._hold_until is not None and now < self._hold_until:
+                self._publish_legs(0.0, 0.0, lt=1.0, rt=1.0)
+                self._print_i += 1
+                if self._print_i % 25 == 0:
+                    left = self._hold_until - now
+                    print(
+                        f"\033[93m[HOLD]\033[0m 原地踏步中 "
+                        f"剩余 {left:.1f}s dist={self._uwb_data.distance:.0f}cm"
+                    )
+                return
+
             soft = 1.0
             if self._soft_t0 is not None and SOFT_START_SEC > 0:
-                soft = min(1.0, (time.time() - self._soft_t0) / SOFT_START_SEC)
+                soft = min(
+                    1.0, max(0.0, (time.time() - self._soft_t0) / SOFT_START_SEC)
+                )
             fwd, rot = apply_soft_scales(fwd, rot, soft)
 
             # 与 keyboard_teleop 一致：跟随时保持 lt/rt=1 心跳 + cmd_vel

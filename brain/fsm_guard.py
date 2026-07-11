@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
+from pathlib import Path
 from typing import Optional, Set
 
 import rospy
@@ -30,6 +32,30 @@ FATAL_FSM: Set[int] = {
 }
 
 _RUNNING_RE = "sim2real switch to running state"
+_STANDBY_RE = "sim2real switch to standby state"
+_TAIL_BYTES = 400_000
+
+
+def _last_run_standby_from_rosout_log() -> Optional[str]:
+    """读 rosout 尾部，返回最后一次是 'running' 还是 'standby'。"""
+    candidates = [
+        Path.home() / ".ros" / "log" / "latest" / "rosout.log",
+        Path("/home/nvidia/.ros/log/latest/rosout.log"),
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            text = path.read_bytes()[-_TAIL_BYTES:].decode("utf-8", errors="ignore")
+            last = None
+            for m in re.finditer(
+                r"sim2real switch to (running|standby) state", text
+            ):
+                last = m.group(1)
+            return last
+        except OSError:
+            continue
+    return None
 
 
 class FsmGuard:
@@ -44,6 +70,8 @@ class FsmGuard:
         self.standby_hint_at: float = 0.0
         self._fsm_sub = rospy.Subscriber(FSM_TOPIC, Int32, self._on_fsm, queue_size=5)
         self._log_sub = rospy.Subscriber(ROSOUT_TOPIC, Log, self._on_log, queue_size=50)
+        # arbiter 重启后订阅无历史：从日志恢复，避免误点 LB 把 RUNNING 拨回 STANDBY
+        self.recover_running_from_log()
 
     def _on_fsm(self, msg: Int32) -> None:
         with self._lock:
@@ -57,10 +85,36 @@ class FsmGuard:
                 self.running_hint = True
                 self.running_hint_at = time.time()
         # 精确匹配运控日志，避免误清
-        if "sim2real switch to standby state" in text:
+        if _STANDBY_RE in text:
             with self._lock:
                 self.running_hint = False
                 self.standby_hint_at = time.time()
+
+    def recover_running_from_log(self) -> bool:
+        """
+        用 ~/.ros/log/latest/rosout.log 尾部恢复 running_hint。
+
+        返回当前是否判定为 RUNNING。已在 RUNNING 时切勿再发 LB。
+        """
+        last = _last_run_standby_from_rosout_log()
+        now = time.time()
+        with self._lock:
+            if last == "running":
+                self.running_hint = True
+                # 用略早时间戳，避免 wait_running_hint(since=now) 误判
+                self.running_hint_at = now - 1.0
+                print(
+                    "\033[92m[FSM]\033[0m 日志恢复: 运控仍在 RUNNING"
+                    "（跳过 LB，避免误拨回 STANDBY）"
+                )
+                return True
+            if last == "standby":
+                self.running_hint = False
+                self.standby_hint_at = now - 1.0
+                print("\033[90m[FSM]\033[0m 日志恢复: 运控在 STANDBY")
+                return False
+        print("\033[90m[FSM]\033[0m 日志无 running/standby 记录，保持未知")
+        return False
 
     def snapshot(self) -> tuple:
         with self._lock:
@@ -101,6 +155,7 @@ class FsmGuard:
     def saw_standby_since(self, since: float) -> bool:
         with self._lock:
             return self.standby_hint_at >= since
+
     def unregister(self) -> None:
         for sub in (self._fsm_sub, self._log_sub):
             try:
