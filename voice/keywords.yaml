@@ -1,0 +1,20 @@
+# 固定口令 → /moon/voice_cmd
+# phrase: 用户说的话（模拟或 KWS 命中文本）
+# cmd: 发给 arbiter 的载荷
+
+commands:
+  - phrase: "小派看我"
+    cmd: face_look
+  - phrase: "小派我们走"
+    cmd: uwb_follow
+  - phrase: "小派停止"
+    cmd: stop
+  - phrase: "小派停下"
+    cmd: stop
+
+# 终端模拟快捷键
+shortcuts:
+  "1": face_look
+  "2": uwb_follow
+  "0": stop
+  "q": quit

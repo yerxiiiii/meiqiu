@@ -38,15 +38,44 @@ def test_clear_far():
 
 
 def test_sidestep_prefers_open_side():
-    # 中间近、右边更通 → bias > 0（建议右转）
+    # 中间近、右边更通 → bias > 0（建议右转）；默认 blend<1 仍应同号
     cap, bias = compute_caps_from_zones(0.5, 0.55, 2.0)
     assert bias > 0, bias
     fwd, rot, reason = apply_safety_gate(
         0.3, 0.0,
         ObstacleState(0.5, 0.55, 2.0, cap, bias, True),
         use_rotate_bias=True,
+        sidestep_blend=1.0,
     )
     assert rot > 0 and "SIDE" in reason, (rot, reason)
+
+
+def test_sidestep_soft_blend():
+    cap, bias = compute_caps_from_zones(0.5, 0.55, 2.0)
+    _, rot_full, _ = apply_safety_gate(
+        0.3, 0.0,
+        ObstacleState(0.5, 0.55, 2.0, cap, bias, True),
+        sidestep_blend=1.0,
+    )
+    _, rot_soft, _ = apply_safety_gate(
+        0.3, 0.0,
+        ObstacleState(0.5, 0.55, 2.0, cap, bias, True),
+        sidestep_blend=0.35,
+    )
+    assert abs(rot_soft) < abs(rot_full) + 1e-6, (rot_soft, rot_full)
+
+
+def test_person_not_hard_stop():
+    # 中区很近本应 STOP，但 person_center 匹配时抬高 cap
+    near = STOP_DIST - 0.05
+    cap, bias = compute_caps_from_zones(2.0, near, 2.0)
+    assert cap == 0.0
+    fwd, rot, reason = apply_safety_gate(
+        0.5, 0.0,
+        ObstacleState(2.0, near, 2.0, cap, bias, True),
+        person_center_m=near,
+    )
+    assert fwd > 0.0 and "PERSON" in reason, (fwd, reason)
 
 
 def test_no_vision_optional():
@@ -68,6 +97,8 @@ def main():
         test_stop_when_near,
         test_clear_far,
         test_sidestep_prefers_open_side,
+        test_sidestep_soft_blend,
+        test_person_not_hard_stop,
         test_no_vision_optional,
         test_no_vision_required,
     ]

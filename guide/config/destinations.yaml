@@ -1,0 +1,34 @@
+# 固定场地目的地 → 时间片动作段
+# type: speak | forward | turn | wait
+# 速度单位: vx m/s, wz rad/s；duration 秒
+# 初期保守: vx <= 0.12, wz <= 0.25；现场标定后改 duration/速度
+
+defaults:
+  max_vx: 0.12
+  max_wz: 0.25
+  control_hz: 50
+
+destinations:
+  bingsheng:
+    name: 炳胜餐厅
+    aliases:
+      - 炳胜餐厅
+      - 炳胜
+    segments:
+      - type: speak
+        text: 好的，请跟我来
+        audio: ack_follow.wav
+      - type: forward
+        vx: 0.10
+        duration: 3.0
+      - type: turn
+        wz: 0.20
+        duration: 2.0
+      - type: forward
+        vx: 0.10
+        duration: 4.0
+      - type: wait
+        duration: 1.0
+      - type: speak
+        text: 已到达炳胜餐厅
+        audio: arrived_bingsheng.wav

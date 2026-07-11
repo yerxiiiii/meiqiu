@@ -1,0 +1,27 @@
+[Unit]
+Description=Moon KWS - 上电默认开麦离线关键词 → /moon/voice_cmd
+Documentation=file:///home/nvidia/moon/voice/README.md
+After=network.target sound.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=nvidia
+Group=nvidia
+SupplementaryGroups=audio
+WorkingDirectory=/home/nvidia/moon/voice
+Environment="HOME=/home/nvidia"
+Environment="USER=nvidia"
+Environment="ROS_MASTER_URI=http://localhost:11311"
+Environment="ROS_HOSTNAME=localhost"
+# 无图形会话时尽量走 ALSA default
+Environment="PULSE_RUNTIME_PATH=/run/user/1000/pulse"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+ExecStart=/home/nvidia/moon/voice/start_kws_boot.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

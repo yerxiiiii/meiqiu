@@ -1,0 +1,56 @@
+# 右臂 5-DOF IK — PiPlusPro_S_12L10A2G2H1W_ZedMini_260322
+# 运动学来源: urdf/PiPlusPro_S_12L10A2G2H1W_ZedMini_260322.urdf
+
+arm_side: right
+urdf_file: PiPlusPro_S_12L10A2G2H1W_ZedMini_260322.urdf
+
+# 5 个臂关节（不含夹爪；实机为 r_claw_joint）
+joint_names:
+  - r_shoulder_pitch_joint
+  - r_shoulder_roll_joint
+  - r_upper_arm_joint
+  - r_elbow_joint
+  - r_wrist_joint
+
+base_link: torso_link
+ee_link: r_wrist_link
+
+ik:
+  max_iterations: 48
+  position_tolerance_m: 0.006
+  orientation_tolerance_rad: 0.15
+  damping: 0.06
+  step_scale: 0.95
+  use_geometric_jacobian: true
+  stall_iterations: 5
+  position_weight: 1.0
+  orientation_weight: 0.2
+  accept_best_effort: true
+
+# 实机：Start 站立 EXEC_DEFAULT(5) 后，仅右臂发 /pi_plus_absolute
+robot:
+  arm_backend: absolute
+  right_only: true
+  absolute_topic: /pi_plus_absolute
+  claw_joint_name: r_claw_joint
+  joint_state_prefix: /livelybot_real_real
+  claw_open_rad: 0.0
+  claw_close_rad: 1.04
+  publish_rate_hz: 50
+  joint_ramp_rad_per_sec: 7.0
+  goal_max_step_rad: 0.18
+  require_fsm_exec_default: true
+
+# IK 参考原点：Start 站立时右臂默认关节角（非 URDF 全零 / 手臂伸直姿）
+# 键盘末端目标以此姿态的正解为零点；可按 rostopic/关节反馈微调
+standing_home_q: [-1.57, -1.37, -0.01, -1.19, 0.0]
+
+# 键盘平移方向（base_link 单位向量），由实机标定
+# 旧映射实测: +X→右, -X→下, +Y→上, -Y→后, +Z→右后, -Z→前右
+teleop:
+  forward: [0, 0, -1]
+  back: [0, -1, 0]
+  right: [1, 0, 0]
+  left: [0, 0, 1]
+  up: [0, 1, 0]
+  down: [-1, 0, 0]

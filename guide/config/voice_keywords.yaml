@@ -1,0 +1,25 @@
+# 离线关键词：需同时命中唤醒词 + 目的地才触发 go_to
+# stop 词单独触发停止
+
+wake_words:
+  - 小派
+  - 派派
+
+stop_words:
+  - 停下
+  - 停止
+  - 站住
+  - 别走
+
+# phrase 命中 → command
+destinations:
+  - id: bingsheng
+    phrases:
+      - 炳胜餐厅
+      - 炳胜
+      - 带我去炳胜
+
+# 完整口令示例（用于 --text 与文档）
+examples:
+  - 小派带我去炳胜餐厅
+  - 小派停下

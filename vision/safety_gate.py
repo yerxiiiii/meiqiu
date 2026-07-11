@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 from obstacle_state import ObstacleState, nearest_valid
 
@@ -24,9 +24,18 @@ ENABLE_SIDESTEP = True
 SIDESTEP_CENTER = 0.80    # 中区近于此才考虑偏转
 SIDESTEP_GAIN = 0.45      # 叠加到 rot 的幅度上限
 SIDESTEP_CLEAR_MARGIN = 0.25  # 侧区至少比中区远这么多才偏
+# 与 UWB 主转向叠加时的混合系数（1=全加，0=不加）；避免满幅硬叠导致边冲边拧
+SIDESTEP_BLEND = 0.35
+# |uwb_rot| 超过此值时进一步压低 sidestep（UWB 已在大幅转向）
+SIDESTEP_UWB_ROT_SOFTEN = 0.12
 
 # 视觉丢失策略（由调用方结合 OBSTACLE_REQUIRED 使用）
 STALE_FORWARD_CAP = 0.0   # 强制安全时：无有效障碍则禁止前进
+
+# 跟人跟随：中区深度常被人占满。若调用方提供 person_center_m（目标人深度），
+# 且与中区接近，则把中区当作“可跟随目标”而非墙（抬高 forward_cap）。
+PERSON_MATCH_TOL_M = 0.45
+PERSON_FOLLOW_CAP_FLOOR = 0.55
 
 
 def _cap_from_distance(d: float) -> float:
@@ -80,6 +89,21 @@ def compute_caps_from_zones(
     return float(max(0.0, min(1.0, forward_cap))), float(max(-1.0, min(1.0, rotate_bias)))
 
 
+def _person_adjusted_cap(
+    cap: float,
+    center_m: float,
+    person_center_m: Optional[float],
+) -> Tuple[float, bool]:
+    """若中区深度≈目标人，抬高 cap，避免把跟随目标当墙。"""
+    if person_center_m is None:
+        return cap, False
+    if not (math.isfinite(center_m) and math.isfinite(person_center_m)):
+        return cap, False
+    if abs(center_m - person_center_m) > PERSON_MATCH_TOL_M:
+        return cap, False
+    return float(max(cap, PERSON_FOLLOW_CAP_FLOOR)), True
+
+
 def apply_safety_gate(
     fwd: float,
     rot: float,
@@ -88,12 +112,16 @@ def apply_safety_gate(
     use_rotate_bias: bool = True,
     stale: bool = False,
     required: bool = False,
+    sidestep_blend: float = SIDESTEP_BLEND,
+    person_center_m: Optional[float] = None,
 ) -> Tuple[float, float, str]:
     """
     裁剪期望摇杆。
 
     stale: 障碍话题超时/未收到
     required: True 且 stale → 禁止前进（fail-safe）
+    sidestep_blend: rotate_bias 叠加比例（默认 <1，避免与 UWB 满幅硬叠）
+    person_center_m: 可选，目标人深度(m)；与中区接近时不当作刹停墙
     返回: (fwd, rot, reason)
     """
     if stale or not obs.valid:
@@ -102,23 +130,34 @@ def apply_safety_gate(
         return fwd, rot, "VISION_OPTIONAL"
 
     cap = float(max(0.0, min(1.0, obs.forward_cap)))
+    cap, person_hit = _person_adjusted_cap(cap, obs.center_m, person_center_m)
+
     # 只限制前进；后退（fwd<0）暂不因前方障碍放大（可按需改）
     if fwd > 0.0:
         fwd = fwd * cap
 
     reason = "CLEAR"
+    if person_hit and cap < 1.0:
+        reason = "PERSON"
     if cap <= 0.0 and fwd >= 0.0:
         fwd = 0.0
         reason = "STOP"
-    elif cap < 1.0:
+    elif cap < 1.0 and reason == "CLEAR":
         reason = "SLOW"
+    elif cap < 1.0 and reason == "PERSON":
+        reason = "PERSON+SLOW"
 
     if use_rotate_bias and abs(obs.rotate_bias) > 1e-3:
-        # 叠加偏置，不覆盖 UWB 主转向；限幅到 [-1,1]
-        rot = max(-1.0, min(1.0, rot + obs.rotate_bias))
+        blend = float(max(0.0, min(1.0, sidestep_blend)))
+        # UWB 已在大幅转向时再压低 sidestep，避免双源抢舵
+        if abs(rot) >= SIDESTEP_UWB_ROT_SOFTEN and SIDESTEP_UWB_ROT_SOFTEN > 1e-6:
+            soften = max(0.2, 1.0 - abs(rot) / max(abs(rot), 0.5))
+            blend *= soften
+        delta = float(obs.rotate_bias) * blend
+        rot = max(-1.0, min(1.0, rot + delta))
         if reason == "CLEAR":
             reason = "SIDESTEP"
-        else:
+        elif "SIDE" not in reason:
             reason = reason + "+SIDE"
 
     return fwd, rot, reason

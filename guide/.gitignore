@@ -1,0 +1,6 @@
+# 大模型不入库
+models/vosk-model-*/
+models/*.zip
+__pycache__/
+*.pyc
+*.log

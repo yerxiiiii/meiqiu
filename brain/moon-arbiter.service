@@ -1,0 +1,24 @@
+[Unit]
+Description=Moon Mode Arbiter - 中央决策（订阅 /moon/voice_cmd）
+Documentation=file:///home/nvidia/moon/brain/README.md
+After=network.target moon-kws.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=nvidia
+Group=nvidia
+SupplementaryGroups=audio dialout
+WorkingDirectory=/home/nvidia/moon/brain
+Environment="HOME=/home/nvidia"
+Environment="USER=nvidia"
+Environment="ROS_MASTER_URI=http://localhost:11311"
+Environment="ROS_HOSTNAME=localhost"
+ExecStart=/home/nvidia/moon/brain/start_arbiter_boot.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

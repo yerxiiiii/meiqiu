@@ -1,3 +1,8 @@
 __pycache__/
 *.pyc
 logs/
+voice/models/
+*.tar.bz2
+*.tar.gz
+.git.bak/
+**/.git/

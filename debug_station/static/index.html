@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Moon Debug Station</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Moon Debug Station</h1>
+      <p class="sub">只读调试台 · 与跟随/视觉功能代码隔离 · 不发控腿指令</p>
+    </div>
+    <div class="meta" id="meta">connecting…</div>
+  </header>
+
+  <section class="layers" id="layers">
+    <div class="layer" data-key="perception"><span class="dot"></span><div><b>感知层</b><small>—</small></div></div>
+    <div class="layer" data-key="decision"><span class="dot"></span><div><b>决策层</b><small>—</small></div></div>
+    <div class="layer" data-key="execution"><span class="dot"></span><div><b>执行层</b><small>—</small></div></div>
+  </section>
+
+  <main class="grid">
+    <section class="card video">
+      <h2>相机第一视角 (FPV)</h2>
+      <p class="hint">画面经本页 <code>/fpv/stream.mjpg</code> 代理（只需开 8090）；按钮启停 ZED Mini</p>
+      <div class="zed-controls">
+        <button type="button" id="btn-zed-on" class="btn btn-on">开启 ZED</button>
+        <button type="button" id="btn-zed-off" class="btn btn-off">关闭 ZED</button>
+        <span id="zed-status" class="zed-status">状态: —</span>
+      </div>
+      <img id="fpv" alt="FPV" />
+      <p class="hint" id="fpv-link"></p>
+      <p class="hint" id="zed-msg"></p>
+    </section>
+
+    <section class="card">
+      <h2>感知 · 障碍 /moon/obstacle</h2>
+      <div class="bars" id="obs-bars"></div>
+      <pre id="obs-json" class="mono">—</pre>
+    </section>
+
+    <section class="card">
+      <h2>感知 · UWB（来自跟随日志，不占串口）</h2>
+      <div class="kv" id="uwb-kv"></div>
+      <pre id="uwb-json" class="mono">—</pre>
+    </section>
+
+    <section class="card">
+      <h2>决策 · 跟随输出</h2>
+      <div class="kv" id="dec-kv"></div>
+      <pre id="dec-json" class="mono">—</pre>
+    </section>
+
+    <section class="card">
+      <h2>执行 · cmd_vel / fsm / joy_msg</h2>
+      <div class="kv" id="exec-kv"></div>
+      <pre id="exec-json" class="mono">—</pre>
+    </section>
+
+    <section class="card wide">
+      <h2>日志 · 最新 uwb_follow 会话</h2>
+      <pre id="log" class="mono log"></pre>
+    </section>
+
+    <section class="card wide">
+      <h2>事件流</h2>
+      <pre id="events" class="mono log"></pre>
+    </section>
+  </main>
+
+  <footer>
+    <span>刷新 5Hz · API <code>/api/snapshot</code></span>
+    <span>深度伪彩图：P1（当前用障碍三区数值代替）</span>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>

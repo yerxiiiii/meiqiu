@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<!-- 自 PiPlusPro_S_12L10A2G2H1W_ZedMini_260322 提取，仅供右臂 5-DOF IK（不含夹爪） -->
+<robot name="PiPlusPro_right_arm_ik">
+  <link name="base_link"/>
+  <link name="waist_yaw_link"/>
+  <link name="torso_link"/>
+  <link name="r_shoulder_pitch_link"/>
+  <link name="r_shoulder_roll_link"/>
+  <link name="r_upper_arm_link"/>
+  <link name="r_elbow_link"/>
+  <link name="r_wrist_link"/>
+  <link name="r_gripper_link"/>
+
+  <joint name="waist_yaw_joint" type="revolute">
+    <origin xyz="0 0 0.0248" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="waist_yaw_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.7" upper="2.7" effort="16" velocity="60"/>
+  </joint>
+  <joint name="torso_joint" type="fixed">
+    <origin xyz="0 0 0.0325" rpy="0 0 0"/>
+    <parent link="waist_yaw_link"/>
+    <child link="torso_link"/>
+  </joint>
+
+  <joint name="r_shoulder_pitch_joint" type="revolute">
+    <origin xyz="0 -0.1084 0.117" rpy="0 0 0"/>
+    <parent link="torso_link"/>
+    <child link="r_shoulder_pitch_link"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-4.18" upper="1.04" effort="10" velocity="60"/>
+  </joint>
+  <joint name="r_shoulder_roll_joint" type="revolute">
+    <origin xyz="0 -0.038 0" rpy="0 0 0"/>
+    <parent link="r_shoulder_pitch_link"/>
+    <child link="r_shoulder_roll_link"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.34" upper="0.13" effort="10" velocity="60"/>
+  </joint>
+  <joint name="r_upper_arm_joint" type="revolute">
+    <origin xyz="0 0 -0.0724" rpy="0 0 0"/>
+    <parent link="r_shoulder_roll_link"/>
+    <child link="r_upper_arm_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.16" upper="2.16" effort="10" velocity="60"/>
+  </joint>
+  <joint name="r_elbow_joint" type="revolute">
+    <origin xyz="0 0 -0.038" rpy="0 0 0"/>
+    <parent link="r_upper_arm_link"/>
+    <child link="r_elbow_link"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2" upper="2" effort="10" velocity="60"/>
+  </joint>
+  <joint name="r_wrist_joint" type="revolute">
+    <origin xyz="0 0 -0.0724" rpy="0 0 0"/>
+    <parent link="r_elbow_link"/>
+    <child link="r_wrist_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.5" upper="2.4" effort="10" velocity="60"/>
+  </joint>
+  <joint name="r_gripper_joint" type="revolute">
+    <origin xyz="0 0 -0.0265" rpy="0 0 0"/>
+    <parent link="r_wrist_link"/>
+    <child link="r_gripper_link"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="1.04" effort="3.6" velocity="60"/>
+  </joint>
+</robot>

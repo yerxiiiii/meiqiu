@@ -74,4 +74,7 @@ python3 /home/nvidia/moon/uwb_follow.py
 | `obstacle_state.py` | 状态结构 + ROS 编解码 |
 | `safety_gate.py` | 限速 / 刹停 / 绕障偏置 |
 | `zed_obstacle_node.py` | ZED → `/moon/obstacle` |
+| `face_obs_node.py` | ZED RGB → `/moon/face`（只感知，不控头） |
 | `zed-obstacle.service` | 可选开机自启 |
+
+与 `moon/brain/mode_arbiter.py` 配合：FACE_LOOK 启 `face_obs_node`，UWB_FOLLOW 启 `zed_obstacle_node`（ZED 互斥）。
