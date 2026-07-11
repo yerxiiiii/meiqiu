@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""跟随控制源互斥：避免 mode_arbiter 与 uwb_follow 双写 /cmd_vel。"""
+"""跟随/运动控制源互斥：避免多个节点双写 /cmd_vel、/joy_msg。"""
 
 from __future__ import annotations
 
@@ -32,33 +32,42 @@ def _systemctl_active(unit: str) -> bool:
 
 def check_follow_conflicts(self_pid: Optional[int] = None) -> Tuple[bool, List[str]]:
     """
-    检测是否有其它跟随控制源在跑。
+    检测是否有其它跟随/运动控制源在跑。
     返回 (ok, warnings)。ok=False 表示强烈建议先停再继续。
     """
     me = self_pid if self_pid is not None else os.getpid()
     warns: List[str] = []
 
-    if _systemctl_active("uwb-follow.service"):
-        warns.append(
+    # systemd units that publish motion
+    for unit, tip in (
+        (
+            "uwb-follow.service",
             "uwb-follow.service 仍为 active → 会与 arbiter 双写 /cmd_vel。"
             "请执行: sudo systemctl stop uwb-follow.service"
-        )
-
-    for pat, label in (
-        ("uwb_follow.py", "uwb_follow.py"),
-        ("moon/brain/mode_arbiter.py", "mode_arbiter.py"),
+            " && sudo systemctl disable uwb-follow.service",
+        ),
     ):
+        if _systemctl_active(unit):
+            warns.append(tip)
+
+    # process patterns that publish /cmd_vel or /joy_msg
+    checks = (
+        ("uwb_follow.py", "uwb_follow.py（独立跟随）"),
+        ("moon/brain/mode_arbiter.py", "mode_arbiter.py"),
+        ("person_follow_ros1.py", "person_follow_ros1.py（视觉跟随）"),
+        ("guide_demo_node.py", "guide_demo_node.py（固定路线带路）"),
+        ("keyboard_teleop.py", "keyboard_teleop.py"),
+        ("unlock_and_walk.py", "unlock_and_walk.py"),
+    )
+    for pat, label in checks:
         pids = [p for p in _pgrep(pat) if p != me]
-        # 自己就是 arbiter 时，忽略自身匹配
-        if "mode_arbiter" in pat and not pids:
+        if not pids:
             continue
-        if "uwb_follow" in pat and pids:
+        if "mode_arbiter" in pat:
+            warns.append(f"已有其它 mode_arbiter 在跑 pid={pids}，请勿多开。")
+        else:
             warns.append(
-                f"检测到 {label} 进程 pid={pids}，请先停掉再启 arbiter，避免抢控制。"
-            )
-        if "mode_arbiter" in pat and pids:
-            warns.append(
-                f"已有其它 mode_arbiter 在跑 pid={pids}，请勿多开。"
+                f"检测到 {label} 进程 pid={pids}，请先停掉再启 arbiter，避免抢 /cmd_vel。"
             )
 
     return (len(warns) == 0), warns

@@ -7,6 +7,10 @@ commands:
     cmd: face_look
   - phrase: "小派我们走"
     cmd: uwb_follow
+  - phrase: "小派跟我走"
+    cmd: uwb_follow
+  - phrase: "跟我走"
+    cmd: uwb_follow
   - phrase: "小派停止"
     cmd: stop
   - phrase: "小派停下"

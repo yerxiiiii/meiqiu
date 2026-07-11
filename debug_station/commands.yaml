@@ -1,0 +1,53 @@
+# 常用命令（测试上位机「快捷命令」与终端白名单）
+ros_topics:
+  /moon/voice_cmd:
+    - stop
+    - uwb_follow
+    - face_look
+  /guide/voice_command:
+    - 停下
+    - 跟我走
+    - 小派跟我走
+    - 小派带我去炳胜餐厅
+    - 小派出发
+    - 带路
+
+shell_whitelist:
+  - pattern: "^rostopic echo /moon/mode -n 1$"
+    timeout: 5
+  - pattern: "^rostopic echo /fsm_state -n 1$"
+    timeout: 5
+  - pattern: "^rostopic echo /imu/data -n 1$"
+    timeout: 5
+  - pattern: "^rostopic echo /guide/state -n 1$"
+    timeout: 5
+  - pattern: "^rostopic list$"
+    timeout: 8
+  - pattern: "^rosnode list$"
+    timeout: 8
+  - pattern: "^pgrep -af 'kws_trigger|mode_arbiter|guide_demo'"
+    timeout: 5
+
+quick_buttons:
+  - group: 模式切换
+    items:
+      - { label: "停止 stop", type: ros, topic: /moon/voice_cmd, data: stop }
+      - { label: "UWB 跟随", type: ros, topic: /moon/voice_cmd, data: uwb_follow }
+      - { label: "看我 face_look", type: ros, topic: /moon/voice_cmd, data: face_look }
+  - group: 语音口令（guide）
+    items:
+      - { label: "小派跟我走", type: ros, topic: /guide/voice_command, data: "小派跟我走" }
+      - { label: "带我去炳胜", type: ros, topic: /guide/voice_command, data: "小派带我去炳胜餐厅" }
+      - { label: "停下", type: ros, topic: /guide/voice_command, data: "停下" }
+      - { label: "出发 walk_test", type: ros, topic: /guide/voice_command, data: "小派出发" }
+  - group: 终端片段（复制到下方终端）
+    items:
+      - { label: "echo /moon/mode", type: snippet, data: "rostopic echo /moon/mode -n 1" }
+      - { label: "echo /fsm_state", type: snippet, data: "rostopic echo /fsm_state -n 1" }
+      - { label: "echo /imu/data", type: snippet, data: "rostopic echo /imu/data -n 1" }
+      - { label: "进程列表", type: snippet, data: "pgrep -af 'kws_trigger|mode_arbiter|guide_demo'" }
+  - group: 启动脚本（本机 shell，后台）
+    items:
+      - { label: "启动 KWS 栈", type: bg_shell, data: "bash /home/nvidia/moon/fixed_route_voice_guide/scripts/start_voice_stack.sh run" }
+      - { label: "voice_sim 模拟", type: bg_shell, data: "python3 /home/nvidia/moon/voice/voice_sim.py" }
+      - { label: "arbiter dry-run", type: bg_shell, data: "python3 /home/nvidia/moon/brain/mode_arbiter.py --dry-run --no-camera-manage" }

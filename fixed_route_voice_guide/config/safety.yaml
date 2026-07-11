@@ -1,0 +1,33 @@
+# 安全与控制参数
+cmd_vel_topic: /cmd_vel
+obstacle_topic: /guide/obstacle_state
+voice_command_topic: /guide/voice_command
+state_topic: /guide/state
+
+# 可走门槛：/fsm_state 进入这些值后才 ARMED
+# 注意：fsm=5 (ExecDefault) 同时覆盖 STANDBY 和 RUNNING 两个子状态，
+# /fsm_state 本身无法区分；ARMED 只代表"可以尝试进入 RUNNING"，
+# 真正能走路还需要 _enter_running() 成功（见 guide_demo_node.py）。
+ready_fsm_states: [5, 6]
+
+# 速度上限：官方文档 linear.x 正常范围 [-0.8, 0.8]（LT 加速可到 1.5），
+# angular.z 约 [-1.57, 1.57]。此前用 0.12 太小，RUNNING 下不产生可见步伐；
+# 0.3 实测已确认可走。仍保守于官方上限，双足初期不用满档。
+max_linear_x: 0.35
+max_angular_z: 0.5
+
+# 发布频率
+publish_hz: 20
+
+# 动作段结束零速保持时间（秒）
+segment_stop_hold: 0.15
+
+# 语音开麦：右摇杆按下（Joy.R / /joy_input buttons[10]）= 开麦 + arbiter + guide（不切策略）；
+# 说「小派跟我走」后才切 amp_right_hold 并跟随；再按 R 关麦 = stop + 恢复 amp。
+# 注意：跟随中 joy_teleop 会被停，kws 改读 /joy_input 物理键，不依赖 /joy_msg.R。
+# 启动: python3 scripts/kws_trigger_node.py
+mic_arm_button: R
+mic_joy_button_index: 10
+mic_joy_topics: ["/joy_input", "/joy"]
+mic_listen_sec: 1800
+brain_voice_topic: /moon/voice_cmd

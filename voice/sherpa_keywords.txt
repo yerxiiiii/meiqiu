@@ -2,3 +2,5 @@ x iǎo p ài k àn w ǒ @小派看我
 x iǎo p ài w ǒ m en z ǒu @小派我们走
 x iǎo p ài t íng zh ǐ @小派停止
 x iǎo p ài t íng x ià @小派停下
+x iǎo p ài g ēn w ǒ z ǒu :2.5 #0.10 @小派跟我走
+g ēn w ǒ z ǒu :3.0 #0.08 @跟我走

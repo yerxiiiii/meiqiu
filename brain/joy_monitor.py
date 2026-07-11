@@ -9,7 +9,11 @@ import time
 import rospy
 from sensor_msgs.msg import Joy
 
+# humanoid_driver 转发 /joy_input → /joy；joy.yaml: button[10]=R（语音开麦）
 JOY_TOPIC = "/joy"
+MIC_ARM_BUTTON_INDEX = 10
+# 右摇杆垂直轴：按下 R 时必然有位移，不能当作“抢遥控”
+IGNORE_AXES = {4}
 ACTIVE_THRESH = 0.15
 IDLE_SEC = 3.0
 TRIGGER_AXES = (2, 5)
@@ -25,6 +29,8 @@ class JoyMonitor:
         self._sub = rospy.Subscriber(JOY_TOPIC, Joy, self._cb, queue_size=5)
 
     def _axis_active(self, idx: int, val: float) -> bool:
+        if idx in IGNORE_AXES:
+            return False
         v = float(val)
         if idx in TRIGGER_AXES:
             return v < (TRIGGER_REST - TRIGGER_MARGIN)
@@ -36,7 +42,9 @@ class JoyMonitor:
                 with self._lock:
                     self._last_active_t = time.time()
                 return
-        for btn in msg.buttons:
+        for i, btn in enumerate(msg.buttons):
+            if i == MIC_ARM_BUTTON_INDEX:
+                continue
             if int(btn) != 0:
                 with self._lock:
                     self._last_active_t = time.time()

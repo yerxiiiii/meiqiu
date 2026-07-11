@@ -45,6 +45,12 @@ cp -v "${SRC_CFG}/pi_plus_22dof_config/pi_plus_22dof_rl_config.yaml" \
 cp -v "${SRC_CFG}/pi_plus_22dof_config/pi_plus_22dof_pd_config.yaml" \
   "${SHARE}/config/pi_plus_22dof_config/"
 
+# This robot (and many Orin images) use production_type=custom → also install custom registry
+if [ -f "${SRC_CFG}/pi_plus_22dof_config/pi_plus_22dof_rl_config_custom.yaml" ]; then
+  cp -v "${SRC_CFG}/pi_plus_22dof_config/pi_plus_22dof_rl_config_custom.yaml" \
+    "${SHARE}/config/pi_plus_22dof_config/"
+fi
+
 # Optional: also sync into catkin src if present
 for SRC_ROOT in \
   "${SIM2REAL_WS}/src/sim2real" \

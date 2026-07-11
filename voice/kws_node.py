@@ -44,6 +44,8 @@ DEFAULT_MODEL_DIR = os.path.join(
 PHRASE_DEFAULTS = {
     "小派看我": "face_look",
     "小派我们走": "uwb_follow",
+    "小派跟我走": "uwb_follow",
+    "跟我走": "uwb_follow",
     "小派停止": "stop",
     "小派停下": "stop",
 }

@@ -1,0 +1,15 @@
+x iǎo p ài ch ū f ā :2.5 #0.10 @小派出发
+x iǎo p ài t íng x ià :2.5 #0.10 @小派停下
+x iǎo p ài t íng zh ǐ :2.5 #0.10 @小派停止
+x iǎo p ài g ēn w ǒ z ǒu :2.5 #0.10 @小派跟我走
+x iǎo p ài d ài w ǒ q ù b ǐng sh èng c ān t īng :2.0 #0.10 @小派带我去炳胜餐厅
+x iǎo p ài d ài w ǒ q ù b ǐng sh èng :2.2 #0.10 @小派带我去炳胜
+x iǎo p ài d ài l ù :2.5 #0.10 @小派带路
+x iǎo p ài :3.0 #0.08 @小派
+ch ū f ā :3.0 #0.08 @出发
+t íng x ià :3.0 #0.08 @停下
+t íng zh ǐ :3.0 #0.08 @停止
+g ēn w ǒ z ǒu :3.0 #0.08 @跟我走
+d ài w ǒ q ù b ǐng sh èng c ān t īng :2.2 #0.10 @带我去炳胜餐厅
+d ài w ǒ q ù b ǐng sh èng :2.5 #0.10 @带我去炳胜
+d ài l ù :3.0 #0.08 @带路

@@ -1,0 +1,54 @@
+# 固定场地目的地与预制路线
+# 速度: linear.x <= 0.35, angular.z <= 0.5（见 safety.yaml；官方正常范围
+# linear.x [-0.8,0.8] / angular.z [-1.57,1.57]，此前 0.08 太小走不动）
+# duration 单位: 秒; 现场标定后按实际地面微调
+
+defaults:
+  linear_x: 0.3
+  angular_z: 0.35
+  publish_hz: 20
+
+destinations:
+  bingsheng:
+    name: 炳胜餐厅
+    keywords:
+      - 带我去炳胜餐厅
+      - 炳胜餐厅
+      - 带我去炳胜
+      - 炳胜
+      - 带路
+    arrive_speak: 已到达炳胜餐厅，请慢走。
+    # 注意：duration 已按新速度(0.08->0.3, 0.20->0.35)等比缩短，
+    # 尽量还原原来预期的行走距离；但原距离本身从未随真实行走验证过，
+    # 现场务必重新走一遍全程并按实际情况微调 duration。
+    route:
+      - {action: speak, text: 好的，请跟我去炳胜餐厅。}
+      - {action: wait, duration: 1.0}
+      - {action: forward, duration: 1.0, linear_x: 0.3}
+      - {action: turn, duration: 0.8, angular_z: 0.35}   # 正值为左转
+      - {action: forward, duration: 1.3, linear_x: 0.3}
+      - {action: turn, duration: 0.8, angular_z: -0.35}  # 负值为右转
+      - {action: forward, duration: 1.0, linear_x: 0.3}
+      - {action: wait, duration: 0.5}
+      - {action: speak, text: 已到达炳胜餐厅，请慢走。}
+
+keywords:
+  # "老派" 是实测中 ASR 把"小派"听岔的真实误听（生僻词被纠成常见词），
+  # 直接列为别名；parse_voice_command 另有编辑距离<=1 的模糊匹配兜底
+  # 未来其它类似误听，这里列出的是已验证过的具体案例。
+  wake: ["小派", "小π", "派派", "老派"]
+  stop: ["停下", "停止", "别走", "停车"]
+  go_to_prefix: ["带我去", "去", "带路"]
+  # "小派，出发" -> 走 walk_test_reps 次短距离直线，验证解锁/走路可重复
+  walk_test: ["出发", "开始走", "走起"]
+  # "小派，跟我走" -> UWB 跟随（转发 /moon/voice_cmd = uwb_follow）
+  uwb_follow: ["跟我走", "跟着我", "开始跟随"]
+  # KWS 单条命中整句「带路 / 带我去炳胜…」时，允许不带唤醒词
+  guide_short: ["带路", "带我去炳胜", "带我去炳胜餐厅"]
+
+# walk_test 参数（handle_command 里的 "walk_test" 命令用）
+walk_test_params:
+  reps: 3
+  seconds: 1.0
+  linear_x: 0.3
+  pause: 1.5

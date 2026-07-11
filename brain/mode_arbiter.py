@@ -21,6 +21,7 @@ import argparse
 import math
 import os
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -43,6 +44,7 @@ from modes import (  # noqa: E402
     TOPIC_MODE,
     TOPIC_OBSTACLE,
     TOPIC_VOICE_CMD,
+    VOICE_CMD_PREPARE_FOLLOW,
     VOICE_TO_MODE,
     Mode,
 )
@@ -68,6 +70,7 @@ from obstacle_state import ObstacleState  # noqa: E402
 from safety_gate import SIDESTEP_BLEND, apply_safety_gate  # noqa: E402
 from person_mask import estimate_person_center_m  # noqa: E402
 from policy_switch import (  # noqa: E402
+    WALK_POLICY_DEFAULT,
     WALK_POLICY_FOLLOW,
     ensure_walk_policy,
 )
@@ -80,9 +83,9 @@ except ImportError:
     SimJoy = None
 
 CONTROL_HZ = 50.0
-SOFT_START_SEC = 6.0
-# 进 RUNNING 后先原地零速踏步，再开始 soft 爬升（避免一起步叠速度）
-POST_RUNNING_HOLD_SEC = 2.5
+# 关闭上层 soft/hold：交给运控 amp_right_hold 的 cmd_vel_filter_scale（与遥控同路）
+SOFT_START_SEC = 0.0
+POST_RUNNING_HOLD_SEC = 0.0
 OBSTACLE_TIMEOUT = 0.8
 # 与 uwb_follow 对齐：先测跟随默认关门控；联调用 --enable-obstacle-gate
 ENABLE_OBSTACLE_GATE = False
@@ -118,6 +121,10 @@ class ModeArbiter:
         self._running_sent = False
         self._motion_armed = False
         self._policy_ready = False
+        self._policy_retry_at = 0.0
+        self._policy_lock = threading.Lock()
+        self._policy_seq = 0
+        self._follow_policy_prepared = False
         self._soft_t0: Optional[float] = None
         self._hold_until: Optional[float] = None  # 进 RUNNING 后零速截止时刻
         self._last_loop = time.time()
@@ -150,8 +157,17 @@ class ModeArbiter:
         owner = self.cam.owner or "none"
         self.cam_pub.publish(String(data=owner))
 
+    def _bump_policy_seq(self) -> int:
+        self._policy_seq += 1
+        return self._policy_seq
+
     def _on_voice(self, msg: String) -> None:
         key = (msg.data or "").strip().lower()
+        if key == VOICE_CMD_PREPARE_FOLLOW:
+            print(
+                "\033[90m[VOICE]\033[0m prepare_follow 已弃用（开麦不再预切策略）"
+            )
+            return
         new_mode = VOICE_TO_MODE.get(key)
         if new_mode is None:
             print(f"\033[93m[VOICE]\033[0m 未知命令: {msg.data!r}")
@@ -167,17 +183,67 @@ class ModeArbiter:
         self._enter_mode(new_mode)
         self._publish_mode()
 
+    def _switch_walk_policy(self, target: str, *, label: str = "") -> bool:
+        if self.joy_pub is None:
+            return False
+        tag = f" ({label})" if label else ""
+        print(f"\033[93m[POLICY]\033[0m 请求切换 → {target}{tag}", flush=True)
+        with self._policy_lock:
+            return ensure_walk_policy(
+                self.joy_pub,
+                target,
+                dry_run=self.dry_run,
+            )
+
+    def _restore_default_policy(self, *, label: str = "idle") -> bool:
+        """同步恢复 amp（关麦/停跟随时必须完成，不能异步被 joy_teleop 打断）。"""
+        if self.dry_run or self.joy_pub is None:
+            return True
+        self._bump_policy_seq()
+        if not self._teleop_killed:
+            self._kill_teleop()
+        ok = self._switch_walk_policy(WALK_POLICY_DEFAULT, label=label)
+        self._follow_policy_prepared = False
+        return ok
+
+    def _restore_default_policy_async(self) -> None:
+        if self.dry_run or self.joy_pub is None:
+            return
+        seq = self._bump_policy_seq()
+
+        def _run() -> None:
+            if seq != self._policy_seq:
+                print(
+                    "\033[90m[POLICY]\033[0m 跳过后台恢复 amp（已有新的策略操作）",
+                    flush=True,
+                )
+                return
+            if not self._teleop_killed:
+                self._kill_teleop()
+            self._switch_walk_policy(WALK_POLICY_DEFAULT, label="stop/idle async")
+            self._follow_policy_prepared = False
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _leave_mode(self, mode: Mode) -> None:
         if mode == Mode.UWB_FOLLOW:
             self._publish_legs(0.0, 0.0)
             self._close_uwb()
             self._running_sent = False
             self._motion_armed = False
+            had_follow_policy = self._policy_ready
             self._policy_ready = False
             self._soft_t0 = None
             self._hold_until = None
-            # 不 clear running_hint：stop 后机器人可能仍在 RUNNING；
-            # 下次进跟随靠 recover_running_from_log / 实时 rosout 判断，避免误点 LB
+            self._follow_policy_prepared = False
+            if had_follow_policy and not self.dry_run:
+                ok = self._restore_default_policy(label="leave UWB_FOLLOW")
+                if not ok:
+                    print(
+                        "\033[91m[POLICY]\033[0m 同步恢复 amp 失败，后台重试",
+                        flush=True,
+                    )
+                    self._restore_default_policy_async()
             if self._teleop_killed and not self.dry_run:
                 self._restore_teleop()
         if mode == Mode.FACE_LOOK:
@@ -188,15 +254,16 @@ class ModeArbiter:
         self.cam.apply_mode(mode)
         self._publish_cam_owner()
         if mode == Mode.UWB_FOLLOW:
+            self._bump_policy_seq()
+            # 先停 joy_teleop，避免它 50Hz 覆盖 arbiter 的 dpad 脉冲导致策略切不动
             if not self.dry_run:
                 self._kill_teleop()
-            # STANDBY 下切 amp_right_hold，再允许进 RUNNING
-            ok = ensure_walk_policy(
-                self.joy_pub,
-                FOLLOW_WALK_POLICY,
-                dry_run=self.dry_run,
+            ok = self._switch_walk_policy(
+                FOLLOW_WALK_POLICY, label="enter UWB_FOLLOW"
             )
             self._policy_ready = ok
+            self._follow_policy_prepared = ok
+            self._policy_retry_at = time.time()
             if ok and not self.dry_run:
                 time.sleep(POLICY_SETTLE_SEC)
             if not ok and not self.dry_run:
@@ -414,10 +481,14 @@ class ModeArbiter:
         if self.joy_mon.blocks():
             if self.mode == Mode.UWB_FOLLOW:
                 self._publish_legs(0.0, 0.0)
-                self._print_i += 1
-                if self._print_i % 50 == 0:
-                    print("\033[93m[JOY]\033[0m 手柄占用，暂停跟随下发")
-            return
+                # 开麦 R 会触发 joy 活动；未开始发跟随速度前不拦截 RUNNING/UWB 流程
+                if self._motion_armed:
+                    self._print_i += 1
+                    if self._print_i % 50 == 0:
+                        print("\033[93m[JOY]\033[0m 手柄占用，暂停跟随下发")
+                    return
+            elif self.mode != Mode.IDLE:
+                return
 
         if self.mode == Mode.IDLE:
             return
@@ -443,14 +514,29 @@ class ModeArbiter:
 
         if self.mode == Mode.UWB_FOLLOW:
             if not self._policy_ready and not self.dry_run:
-                self._print_i += 1
-                if self._print_i % 50 == 0:
+                if now - self._policy_retry_at >= 8.0:
+                    self._policy_retry_at = now
                     print(
-                        f"\033[91m[POLICY]\033[0m 等待 {FOLLOW_WALK_POLICY}，"
-                        "不下发跟随速度"
+                        f"\033[93m[POLICY]\033[0m 重试切换 {FOLLOW_WALK_POLICY} ...",
+                        flush=True,
                     )
-                self._publish_legs(0.0, 0.0)
-                return
+                    if not self._teleop_killed:
+                        self._kill_teleop()
+                    ok = self._switch_walk_policy(
+                        FOLLOW_WALK_POLICY, label="retry"
+                    )
+                    if ok:
+                        self._policy_ready = True
+                        time.sleep(POLICY_SETTLE_SEC)
+                if not self._policy_ready:
+                    self._print_i += 1
+                    if self._print_i % 50 == 0:
+                        print(
+                            f"\033[91m[POLICY]\033[0m 等待 {FOLLOW_WALK_POLICY}，"
+                            "不下发跟随速度"
+                        )
+                    self._publish_legs(0.0, 0.0)
+                    return
 
             if not self._ensure_uwb():
                 self._print_i += 1

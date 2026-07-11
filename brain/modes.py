@@ -15,6 +15,7 @@ class Mode(str, Enum):
 # /moon/voice_cmd 载荷（std_msgs/String.data）
 VOICE_CMD_FACE_LOOK = "face_look"
 VOICE_CMD_UWB_FOLLOW = "uwb_follow"
+VOICE_CMD_PREPARE_FOLLOW = "prepare_follow"
 VOICE_CMD_STOP = "stop"
 
 VOICE_TO_MODE = {
@@ -36,6 +37,7 @@ TOPIC_CAMERA_OWNER = "/moon/camera_owner"
 
 # 运控 walk 策略名（与 sim2real rl_config / AMP_RIGHT_HOLD.md 一致）
 WALK_POLICY_FOLLOW = "amp_right_hold"
+WALK_POLICY_DEFAULT = "amp"
 
 # /moon/face Float32MultiArray: [dx_n, dy_n, has_face, valid]
 FACE_LAYOUT_LEN = 4

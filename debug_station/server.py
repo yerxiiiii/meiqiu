@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Moon 调试上位机（只读，与功能代码隔离）
-========================================
+Moon 语音链路测试上位机
+======================
   python3 /home/nvidia/moon/debug_station/server.py
 
 默认 http://0.0.0.0:8090
-不发布 /cmd_vel、/joy_msg；不打开 UWB 串口。
+- 命令终端（ROS 发布 + 白名单 shell）
+- IMU /imu/data
+- 语音链路状态（开麦/关麦、模式、跟随）
+- 常用命令快捷框
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import json
-import mimetypes
 import os
 import sys
 import threading
@@ -28,9 +31,9 @@ STATIC = os.path.join(HERE, "static")
 sys.path.insert(0, HERE)
 
 from collectors import Collectors, LOG_DIR  # noqa: E402
+from command_runner import CommandRunner  # noqa: E402
 from zed_process import ZedProcessManager  # noqa: E402
 
-# 本机视觉 FPV（由 zed_obstacle_node 提供）；调试台做同端口代理，避免浏览器跨端口/SSH 只转 8090
 FPV_UPSTREAM = "http://127.0.0.1:8080"
 
 
@@ -39,16 +42,25 @@ def _json(obj: Any) -> bytes:
 
 
 class DebugServer:
-    def __init__(self, host: str, port: int, collectors: Collectors, zed: ZedProcessManager):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        collectors: Collectors,
+        zed: ZedProcessManager,
+        cmd_runner: CommandRunner,
+    ):
         self.host = host
         self.port = port
         self.collectors = collectors
         self.zed = zed
+        self.cmd_runner = cmd_runner
         self._httpd = None
 
     def serve_forever(self) -> None:
         coll = self.collectors
         zed = self.zed
+        runner = self.cmd_runner
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):
@@ -86,6 +98,13 @@ class DebugServer:
                     return self._send(200, _json(zed.start()), "application/json; charset=utf-8")
                 if path == "/api/zed/stop":
                     return self._send(200, _json(zed.stop()), "application/json; charset=utf-8")
+                if path == "/api/cmd":
+                    body = self._read_json()
+                    line = body.get("cmd") or body.get("line") or ""
+                    return self._send(200, _json(runner.run(line)), "application/json; charset=utf-8")
+                if path == "/api/cmd/action":
+                    body = self._read_json()
+                    return self._send(200, _json(runner.run_action(body)), "application/json; charset=utf-8")
                 self.send_error(404)
 
             def do_GET(self):
@@ -103,7 +122,6 @@ class DebugServer:
                 if path == "/api/zed/status":
                     return self._send(200, _json(zed.status()), "application/json; charset=utf-8")
 
-                # 同端口代理 FPV，页面用 /fpv/stream.mjpg 即可（不必再开 8080 转发）
                 if path in ("/fpv/stream.mjpg", "/fpv/stream.mjpg/"):
                     return self._proxy_fpv_stream()
                 if path in ("/fpv", "/fpv/"):
@@ -121,6 +139,17 @@ class DebugServer:
                         "t": snap.t,
                         "ros_ok": snap.ros_ok,
                         "layers": snap.layers,
+                        "voice_chain": snap.voice_chain,
+                        "moon_mode": snap.moon_mode,
+                        "moon_mode_age": snap.moon_mode_age,
+                        "guide_state": snap.guide_state,
+                        "guide_state_age": snap.guide_state_age,
+                        "last_voice_cmd": snap.last_voice_cmd,
+                        "last_guide_cmd": snap.last_guide_cmd,
+                        "mic": snap.mic,
+                        "processes": snap.processes,
+                        "imu": snap.imu,
+                        "imu_age": snap.imu_age,
                         "uwb": snap.uwb,
                         "uwb_age": snap.uwb_age,
                         "uwb_log_path": snap.uwb_log_path,
@@ -136,12 +165,25 @@ class DebugServer:
                         "joy_age": snap.joy_age,
                         "events": snap.events,
                         "zed": zed.status(),
+                        "quick_buttons": runner.quick_buttons(),
                         "links": {
                             "fpv": f"http://{host}:8080/stream.mjpg",
-                            "fpv_page": f"http://{host}:8080/",
+                            "mic_meter": f"http://{host}:8091/",
                         },
                     }
                     return self._send(200, _json(payload), "application/json; charset=utf-8")
+
+                if path == "/api/terminal":
+                    n = 100
+                    try:
+                        n = min(300, max(20, int(qs.get("n", ["100"])[0])))
+                    except Exception:
+                        pass
+                    return self._send(
+                        200,
+                        _json({"lines": runner.history(n)}),
+                        "application/json; charset=utf-8",
+                    )
 
                 if path == "/api/logs":
                     n = 120
@@ -160,7 +202,12 @@ class DebugServer:
                     snap = coll.snapshot()
                     return self._send(
                         200,
-                        _json({"ros_ok": snap.ros_ok, "layers": snap.layers, "zed": zed.status()}),
+                        _json({
+                            "ros_ok": snap.ros_ok,
+                            "layers": snap.layers,
+                            "voice_chain": snap.voice_chain,
+                            "zed": zed.status(),
+                        }),
                         "application/json; charset=utf-8",
                     )
 
@@ -176,7 +223,6 @@ class DebugServer:
                 self._send(200, body, ctype)
 
             def _proxy_fpv_stream(self) -> None:
-                """把 127.0.0.1:8080/stream.mjpg 转到本服务，浏览器只访问 8090。"""
                 url = FPV_UPSTREAM + "/stream.mjpg"
                 try:
                     req = urllib.request.Request(url, method="GET")
@@ -218,15 +264,13 @@ class DebugServer:
 
         self._httpd = ThreadingHTTPServer((self.host, self.port), Handler)
         print(f"[debug_station] http://{self.host}:{self.port}/")
+        print(f"[debug_station] 语音链路测试 · 终端 /api/cmd · IMU /imu/data")
         print(f"[debug_station] FPV proxy: /fpv/stream.mjpg -> {FPV_UPSTREAM}/stream.mjpg")
-        print(f"[debug_station] ZED on/off via /api/zed/start|stop")
         print(f"[debug_station] logs dir: {LOG_DIR}")
         self._httpd.serve_forever()
 
 
 def _tail_latest_log(n: int):
-    import glob
-
     files = sorted(glob.glob(os.path.join(LOG_DIR, "uwb_follow_*.log")), key=os.path.getmtime, reverse=True)
     if not files:
         return ["", "(no uwb_follow_*.log yet)"]
@@ -240,7 +284,7 @@ def _tail_latest_log(n: int):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Moon debug station (isolated, read-only)")
+    ap = argparse.ArgumentParser(description="Moon voice-chain test station")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8090)
     ap.add_argument("--no-ros", action="store_true", help="only tail logs (no rospy)")
@@ -248,15 +292,18 @@ def main():
 
     coll = Collectors()
     zed = ZedProcessManager()
+    runner = CommandRunner()
     coll.start_log_tail()
     if not args.no_ros:
         ok = coll.start_ros()
-        if not ok:
+        if ok:
+            runner.init_ros()
+        else:
             print("[debug_station] WARN: ROS not available, log-only mode")
     else:
         print("[debug_station] --no-ros: log tail only")
 
-    srv = DebugServer(args.host, args.port, coll, zed)
+    srv = DebugServer(args.host, args.port, coll, zed, runner)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

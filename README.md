@@ -6,6 +6,8 @@ UWB + 视觉感知 → 决策（brain）→ 运控（sim2real）。
 
 - 决策与跟随注意：[`brain/README.md`](brain/README.md)（含 **使用注意**）
 - 运控策略 `amp_right_hold`：[`docs/AMP_RIGHT_HOLD.md`](docs/AMP_RIGHT_HOLD.md)（配置见 `sim2real/config/`）
+- 固定路线语音带路：[`fixed_route_voice_guide/README.md`](fixed_route_voice_guide/README.md)
+- 调试台：[`debug_station/README.md`](debug_station/README.md)
 
 ## 换机必做（别人 clone 后）
 
@@ -31,4 +33,6 @@ UWB + 视觉感知 → 决策（brain）→ 运控（sim2real）。
 2. 手柄 `LT+RT+Start` → STANDBY
 3. `sudo systemctl stop uwb-follow.service`（勿另开 `uwb_follow.py`）
 4. `python3 /home/nvidia/moon/brain/mode_arbiter.py`
-5. 口令「小派我们走」→ 自动切 `amp_right_hold` 并跟随
+5. 口令「小派我们走」/「小派跟我走」→ 自动切 `amp_right_hold` 并跟随
+
+手柄 **R（开麦）** 可预热跟随策略；关麦恢复默认 `amp`。带路见 `fixed_route_voice_guide/`。

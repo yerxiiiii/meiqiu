@@ -1,4 +1,4 @@
-/* Moon Debug Station — read-only UI (+ ZED process control) */
+/* Moon 语音链路测试上位机 */
 
 function fmt(n, d = 2) {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -8,6 +8,14 @@ function fmt(n, d = 2) {
 function age(s) {
   if (s === undefined || s === null || s > 100) return "stale";
   return s.toFixed(2) + "s";
+}
+
+function setStep(key, info) {
+  const el = document.querySelector(`.chain-step[data-key="${key}"]`);
+  if (!el || !info) return;
+  el.classList.remove("green", "yellow", "red");
+  el.classList.add(info.status || "red");
+  el.querySelector("small").textContent = info.detail || "—";
 }
 
 function setLayer(key, info) {
@@ -20,53 +28,172 @@ function setLayer(key, info) {
 
 function kv(el, rows) {
   el.innerHTML = rows
-    .map(
-      ([k, v]) =>
-        `<div class="item"><label>${k}</label><span>${v}</span></div>`
-    )
+    .map(([k, v]) => `<div class="item"><label>${k}</label><span>${v}</span></div>`)
     .join("");
 }
 
-function renderObs(o, a) {
-  const bars = document.getElementById("obs-bars");
-  if (!o || Object.keys(o).length === 0) {
-    bars.innerHTML = `<div class="bar"><div class="v">—</div><div class="l">no data</div></div>`;
-  } else {
-    bars.innerHTML = ["left_m", "center_m", "right_m"]
-      .map((k) => {
-        const label = k.replace("_m", "");
-        return `<div class="bar"><div class="v">${fmt(o[k], 2)}</div><div class="l">${label} m</div></div>`;
-      })
-      .join("");
+let quickActions = [];
+
+function renderQuickButtons(groups) {
+  const root = document.getElementById("quick-buttons");
+  if (!groups || !groups.length) {
+    root.innerHTML = "<p class='hint'>无配置</p>";
+    return;
   }
-  document.getElementById("obs-json").textContent = JSON.stringify(
-    { ...o, age: age(a) },
-    null,
-    2
-  );
+  quickActions = [];
+  let html = "";
+  groups.forEach((g) => {
+    html += `<div class="quick-group"><div class="quick-title">${g.group || "命令"}</div><div class="quick-row">`;
+    (g.items || []).forEach((it) => {
+      const idx = quickActions.length;
+      quickActions.push(it);
+      html += `<button type="button" class="btn quick-btn" data-idx="${idx}">${it.label}</button>`;
+    });
+    html += "</div></div>";
+  });
+  root.innerHTML = html;
+
+  root.querySelectorAll(".quick-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = quickActions[Number(btn.dataset.idx)];
+      if (!action) return;
+      if (action.type === "snippet") {
+        document.getElementById("terminal-in").value = action.data || "";
+        document.getElementById("terminal-in").focus();
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/cmd/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(action),
+        });
+        const j = await r.json();
+        await refreshTerminal();
+        if (!j.ok) alert(j.msg || "失败");
+      } catch (e) {
+        alert("请求失败: " + e);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 }
+
+function renderProcs(procs) {
+  const el = document.getElementById("proc-list");
+  const names = {
+    kws_trigger: "KWS (guide)",
+    kws_brain: "KWS (brain)",
+    mode_arbiter: "mode_arbiter",
+    guide_demo: "guide_demo",
+    uwb_follow: "uwb_follow",
+    zed_obstacle: "zed_obstacle",
+  };
+  el.innerHTML = Object.entries(names)
+    .map(([k, label]) => {
+      const p = (procs || {})[k] || {};
+      const on = !!p.running;
+      return `<div class="proc ${on ? "on" : "off"}"><span class="pdot"></span>${label}</div>`;
+    })
+    .join("");
+}
+
+function renderImu(imu, imuAge) {
+  const grid = document.getElementById("imu-grid");
+  const bars = document.getElementById("imu-bars");
+  if (!imu || !Object.keys(imu).length) {
+    grid.innerHTML = "<p class='hint'>无 IMU 数据（检查 yesense / /imu/data）</p>";
+    bars.innerHTML = "";
+    document.getElementById("imu-json").textContent = "—";
+    return;
+  }
+  kv(grid, [
+    ["roll °", fmt(imu.roll_deg, 1)],
+    ["pitch °", fmt(imu.pitch_deg, 1)],
+    ["yaw °", fmt(imu.yaw_deg, 1)],
+    ["age", age(imuAge)],
+  ]);
+  const acc = ["ax", "ay", "az"].map((k) => Math.abs(imu[k] || 0));
+  const gyr = ["gx", "gy", "gz"].map((k) => Math.abs(imu[k] || 0));
+  bars.innerHTML =
+    `<div class="bar-group"><div class="bar-title">线性加速度</div>` +
+    ["ax", "ay", "az"]
+      .map((k, i) => {
+        const v = imu[k] || 0;
+        const pct = Math.min(100, acc[i] * 20);
+        return `<div class="bar-row"><span>${k}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div><span>${fmt(v, 2)}</span></div>`;
+      })
+      .join("") +
+    `</div><div class="bar-group"><div class="bar-title">角速度</div>` +
+    ["gx", "gy", "gz"]
+      .map((k, i) => {
+        const v = imu[k] || 0;
+        const pct = Math.min(100, gyr[i] * 30);
+        return `<div class="bar-row"><span>${k}</span><div class="bar-track"><div class="bar-fill gyro" style="width:${pct}%"></div></div><span>${fmt(v, 2)}</span></div>`;
+      })
+      .join("") +
+    "</div>";
+  document.getElementById("imu-json").textContent = JSON.stringify({ ...imu, age: imuAge }, null, 2);
+}
+
+function renderMic(mic, chain) {
+  const rms = Number(mic?.rms) || 0;
+  const fill = document.getElementById("mic-fill");
+  const pct = Math.min(100, rms * 500);
+  fill.style.width = pct + "%";
+  fill.className = "mic-fill" + (chain?.mic?.open ? " open" : "");
+  document.getElementById("mic-label").textContent =
+    `RMS ${rms.toFixed(4)} · ${chain?.mic?.open ? "开麦" : "关麦/待机"}`;
+}
+
+async function refreshTerminal() {
+  try {
+    const r = await fetch("/api/terminal?n=120", { cache: "no-store" });
+    const j = await r.json();
+    const out = document.getElementById("terminal-out");
+    out.textContent = (j.lines || []).join("\n") || "(终端就绪)";
+    out.scrollTop = out.scrollHeight;
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+document.getElementById("terminal-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const inp = document.getElementById("terminal-in");
+  const line = inp.value.trim();
+  if (!line) return;
+  inp.value = "";
+  try {
+    const r = await fetch("/api/cmd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd: line }),
+    });
+    const j = await r.json();
+    await refreshTerminal();
+    if (!j.ok && j.msg) {
+      /* already logged */
+    }
+  } catch (err) {
+    alert("终端错误: " + err);
+  }
+});
 
 function renderZed(z) {
   const st = document.getElementById("zed-status");
   if (!z) {
-    st.textContent = "状态: —";
-    st.className = "zed-status";
+    st.textContent = "—";
     return;
   }
-  const on = !!z.running;
-  st.textContent = on
-    ? "状态: 开启" + (z.pids?.length ? ` (pid ${z.pids.join(",")})` : "")
-    : "状态: 关闭";
-  st.className = "zed-status " + (on ? "on" : "off");
+  st.textContent = z.running ? "ZED 开启" : "ZED 关闭";
+  st.className = "zed-status " + (z.running ? "on" : "off");
 }
 
 async function zedAction(which) {
-  const onBtn = document.getElementById("btn-zed-on");
-  const offBtn = document.getElementById("btn-zed-off");
-  const msg = document.getElementById("zed-msg");
-  onBtn.disabled = true;
-  offBtn.disabled = true;
-  msg.textContent = which === "start" ? "正在开启 ZED…" : "正在关闭 ZED…";
+  const msg = document.getElementById("zed-status");
   try {
     const r = await fetch(`/api/zed/${which}`, { method: "POST" });
     const j = await r.json();
@@ -74,23 +201,18 @@ async function zedAction(which) {
     renderZed(j);
     const img = document.getElementById("fpv");
     if (which === "start" && j.ok) {
-      img.dataset.off = "0";
       img.src = `/fpv/stream.mjpg?t=${Date.now()}`;
     }
-    if (which === "stop") {
-      img.dataset.off = "1";
-      img.removeAttribute("src");
-    }
+    if (which === "stop") img.removeAttribute("src");
   } catch (e) {
-    msg.textContent = "请求失败: " + e;
-  } finally {
-    onBtn.disabled = false;
-    offBtn.disabled = false;
+    msg.textContent = "失败: " + e;
   }
 }
 
 document.getElementById("btn-zed-on").addEventListener("click", () => zedAction("start"));
 document.getElementById("btn-zed-off").addEventListener("click", () => zedAction("stop"));
+
+let quickRendered = false;
 
 async function tick() {
   try {
@@ -98,78 +220,59 @@ async function tick() {
     const s = await r.json();
 
     document.getElementById("meta").innerHTML =
-      `ros=${s.ros_ok ? "ok" : "off"} · t=${new Date(s.t * 1000).toLocaleTimeString()}` +
-      `<br/>log=${(s.uwb_log_path || "").split("/").pop() || "—"}`;
+      `ros=${s.ros_ok ? "ok" : "off"} · ${new Date(s.t * 1000).toLocaleTimeString()}` +
+      `<br/><a href="${s.links?.mic_meter || "http://localhost:8091/"}" target="_blank" rel="noopener">麦克监视 :8091</a>`;
+
+    const vc = s.voice_chain || {};
+    setStep("mic", vc.mic);
+    setStep("kws", vc.kws);
+    setStep("mode", vc.mode);
+    setStep("react", vc.react);
 
     setLayer("perception", s.layers?.perception);
     setLayer("decision", s.layers?.decision);
     setLayer("execution", s.layers?.execution);
 
-    renderZed(s.zed);
-
-    const fpvUrl = `/fpv/stream.mjpg`;
-    const img = document.getElementById("fpv");
-    if (s.zed?.running) {
-      if (!img.src || img.dataset.off === "1" || !String(img.src).includes("/fpv/stream")) {
-        img.dataset.off = "0";
-        img.src = fpvUrl + "?t=" + Date.now();
-      }
+    if (!quickRendered && s.quick_buttons) {
+      renderQuickButtons(s.quick_buttons);
+      quickRendered = true;
     }
-    document.getElementById("fpv-link").innerHTML =
-      `同端口代理 <a href="/fpv/" target="_blank" rel="noopener">/fpv/</a> · 上游 :8080`;
 
-    renderObs(s.obstacle, s.obstacle_age);
+    renderProcs(s.processes);
+    renderImu(s.imu, s.imu_age);
+    renderMic(s.mic, vc);
 
-    kv(document.getElementById("uwb-kv"), [
-      ["dist cm", fmt(s.uwb?.dist_cm, 1)],
-      ["ang °", fmt(s.uwb?.ang_deg, 1)],
-      ["age", age(s.uwb_age)],
-      ["source", s.uwb?.source || "—"],
+    kv(document.getElementById("flow-kv"), [
+      ["/moon/mode", `${s.moon_mode || "—"} (${age(s.moon_mode_age)})`],
+      ["/guide/state", `${s.guide_state || "—"} (${age(s.guide_state_age)})`],
+      ["最近 voice_cmd", s.last_voice_cmd || "—"],
+      ["最近 guide_cmd", s.last_guide_cmd || "—"],
+      ["KWS 命中", vc.kws?.last_hit || "—"],
+      ["麦克", vc.mic?.open ? "开麦" : "关麦"],
     ]);
-    document.getElementById("uwb-json").textContent = JSON.stringify(s.uwb || {}, null, 2);
 
-    kv(document.getElementById("dec-kv"), [
-      ["ctrl", s.decision?.ctrl || "—"],
-      ["fwd", fmt(s.decision?.fwd, 3)],
-      ["rot", fmt(s.decision?.rot, 3)],
-      ["gate", s.decision?.gate || "—"],
-      ["soft", fmt(s.decision?.soft, 2)],
-      ["cmd_vx", fmt(s.decision?.cmd_vx, 3)],
+    kv(document.getElementById("sense-kv"), [
+      ["UWB dist", fmt(s.uwb?.dist_cm, 1) + " cm"],
+      ["UWB ang", fmt(s.uwb?.ang_deg, 1) + " °"],
+      ["UWB age", age(s.uwb_age)],
+      ["障碍 L/C/R", [s.obstacle?.left_m, s.obstacle?.center_m, s.obstacle?.right_m].map((x) => fmt(x, 2)).join(" / ")],
     ]);
-    document.getElementById("dec-json").textContent = JSON.stringify(s.decision || {}, null, 2);
 
-    const fsmMap = {
-      5: "EXEC_DEFAULT",
-      8: "PROTECTION_SHUTDOWN",
-    };
+    const fsmMap = { 5: "EXEC", 8: "PROTECT" };
     kv(document.getElementById("exec-kv"), [
       ["fsm", s.fsm_state == null ? "—" : `${s.fsm_state} ${fsmMap[s.fsm_state] || ""}`],
       ["cmd hz", fmt(s.cmd_hz, 1)],
-      ["vx", fmt(s.cmd_vel?.vx, 3)],
-      ["wz", fmt(s.cmd_vel?.wz, 3)],
-      ["cmd age", age(s.cmd_age)],
-      ["joy lv", fmt(s.joy_msg?.l_vertical, 3)],
+      ["vx / wz", `${fmt(s.cmd_vel?.vx, 3)} / ${fmt(s.cmd_vel?.wz, 3)}`],
     ]);
-    document.getElementById("exec-json").textContent = JSON.stringify(
-      { fsm: s.fsm_state, cmd_vel: s.cmd_vel, joy_msg: s.joy_msg },
-      null,
-      2
-    );
 
+    renderZed(s.zed);
     document.getElementById("events").textContent = (s.events || []).join("\n") || "(no events)";
   } catch (e) {
     document.getElementById("meta").textContent = "API error: " + e;
   }
-
-  try {
-    const lr = await fetch("/api/logs?n=80", { cache: "no-store" });
-    const lj = await lr.json();
-    document.getElementById("log").textContent =
-      (lj.lines || []).join("\n") || "(no log lines)";
-  } catch (_) {
-    /* ignore */
-  }
 }
 
+refreshTerminal();
 tick();
 setInterval(tick, 200);
+setInterval(refreshTerminal, 800);

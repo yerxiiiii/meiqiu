@@ -24,6 +24,7 @@ except ImportError:
 
 # 与 docs/AMP_RIGHT_HOLD.md / rl_config.yaml 一致
 WALK_POLICY_FOLLOW = "amp_right_hold"
+WALK_POLICY_DEFAULT = "amp"
 
 JOY_TOPIC = "/joy_msg"
 FSM_TOPIC = "/fsm_state"
@@ -128,6 +129,11 @@ def ensure_walk_policy(
         return False
 
     tracker = PolicyTracker()
+    boot = _read_last_policy_from_log()
+    if boot:
+        tracker.policy = boot
+        tracker.updated_at = time.time()
+        print(f"\033[90m[POLICY]\033[0m 日志/bootstrap 当前={boot!r}")
     fsm = {"v": None}
 
     def _on_fsm(msg: Int32) -> None:
@@ -170,6 +176,17 @@ def ensure_walk_policy(
             f"ctrl={tracker.ctrl_group!r}"
         )
         if tracker.policy == target:
+            break
+        # amp → amp_right_hold 只需一步；若仍停在 amp 说明脉冲未生效
+        if (
+            target == WALK_POLICY_FOLLOW
+            and tracker.policy == WALK_POLICY_DEFAULT
+            and i >= 1
+        ):
+            print(
+                "\033[91m[POLICY]\033[0m Next 无效（仍停在 amp），"
+                "请确认 STANDBY 且 joy_teleop 已停"
+            )
             break
 
     ok = tracker.policy == target

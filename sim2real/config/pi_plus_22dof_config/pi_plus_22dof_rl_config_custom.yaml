@@ -1,0 +1,12 @@
+# production_type=custom 时本机实际加载此文件
+walk:
+  - name: "amp"
+    path: "walk/amp_pi_plus_20dof.yaml"
+  - name: "amp_right_hold"
+    path: "walk/amp_pi_plus_20dof_right_hold.yaml"
+  - name: "lr"
+    path: "walk/lr.yaml"
+  - name: "footstep"
+    path: "walk/footstep.yaml"
+motion:
+up:

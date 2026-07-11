@@ -1,48 +1,58 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-调试台数据采集（只读）
-====================
-- 订 ROS 话题：/moon/obstacle, /cmd_vel, /fsm_state, /joy_msg
-- 尾读 uwb_follow 会话日志（不占串口，不改跟随代码）
-- 不发布任何控制指令
+调试台数据采集（只读 + 语音链路状态）
+====================================
+- ROS: /moon/obstacle, /cmd_vel, /fsm_state, /joy_msg, /imu/data
+       /moon/mode, /guide/state, /moon/voice_cmd, /guide/voice_command
+- 尾读 uwb_follow 日志
+- 进程健康 + 麦克风电平代理
 """
 
 from __future__ import annotations
 
 import glob
+import math
 import os
 import re
+import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# 路径（相对本包，不硬编码进功能模块）
-# ---------------------------------------------------------------------------
 MOON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOG_DIR = os.path.join(MOON_ROOT, "logs")
 UWB_LOG_GLOB = os.path.join(LOG_DIR, "uwb_follow_*.log")
+MIC_METER_URL = "http://127.0.0.1:8091/api/rms"
 
 OBS_STALE_SEC = 0.8
 UWB_STALE_SEC = 1.5
 CMD_STALE_SEC = 1.0
+IMU_STALE_SEC = 0.5
+
+PROC_PATTERNS = {
+    "kws_trigger": "kws_trigger_node.py",
+    "kws_brain": "kws_node.py",
+    "mode_arbiter": "mode_arbiter.py",
+    "guide_demo": "guide_demo_node.py",
+    "uwb_follow": "uwb_follow.py",
+    "zed_obstacle": "zed_obstacle_node.py",
+}
 
 
 @dataclass
 class Snapshot:
     t: float = field(default_factory=time.time)
-    # perception
     obstacle: Dict[str, Any] = field(default_factory=dict)
     obstacle_age: float = 999.0
     uwb: Dict[str, Any] = field(default_factory=dict)
     uwb_age: float = 999.0
     uwb_log_path: str = ""
-    # decision (from log MOTION)
     decision: Dict[str, Any] = field(default_factory=dict)
-    # execution
     fsm_state: Optional[int] = None
     fsm_age: float = 999.0
     cmd_vel: Dict[str, float] = field(default_factory=dict)
@@ -50,10 +60,38 @@ class Snapshot:
     cmd_hz: float = 0.0
     joy_msg: Dict[str, float] = field(default_factory=dict)
     joy_age: float = 999.0
-    # meta
+    imu: Dict[str, Any] = field(default_factory=dict)
+    imu_age: float = 999.0
+    moon_mode: str = ""
+    moon_mode_age: float = 999.0
+    guide_state: str = ""
+    guide_state_age: float = 999.0
+    last_voice_cmd: str = ""
+    last_voice_cmd_t: float = 0.0
+    last_guide_cmd: str = ""
+    last_guide_cmd_t: float = 0.0
+    mic: Dict[str, Any] = field(default_factory=dict)
+    processes: Dict[str, Any] = field(default_factory=dict)
+    voice_chain: Dict[str, Any] = field(default_factory=dict)
     ros_ok: bool = False
     layers: Dict[str, Any] = field(default_factory=dict)
     events: List[str] = field(default_factory=list)
+
+
+def _quat_to_euler(x: float, y: float, z: float, w: float) -> Dict[str, float]:
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+    sinp = 2 * (w * y - z * x)
+    pitch = math.asin(max(-1.0, min(1.0, sinp)))
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return {
+        "roll_deg": math.degrees(roll),
+        "pitch_deg": math.degrees(pitch),
+        "yaw_deg": math.degrees(yaw),
+    }
 
 
 class Collectors:
@@ -68,6 +106,16 @@ class Collectors:
         self._cmd_stamps: Deque[float] = deque(maxlen=50)
         self._joy: Dict[str, float] = {}
         self._joy_t = 0.0
+        self._imu: Dict[str, Any] = {}
+        self._imu_t = 0.0
+        self._moon_mode = ""
+        self._moon_mode_t = 0.0
+        self._guide_state = ""
+        self._guide_state_t = 0.0
+        self._last_voice_cmd = ""
+        self._last_voice_cmd_t = 0.0
+        self._last_guide_cmd = ""
+        self._last_guide_cmd_t = 0.0
         self._uwb: Dict[str, Any] = {}
         self._uwb_t = 0.0
         self._decision: Dict[str, Any] = {}
@@ -76,8 +124,10 @@ class Collectors:
         self._log_pos = 0
         self._ros_ok = False
         self._stop = False
+        self._mic_cache: Dict[str, Any] = {}
+        self._mic_cache_t = 0.0
+        self._process_cache: Dict[str, Any] = _scan_processes()
 
-    # ---- ROS callbacks ----
     def _on_obstacle(self, msg) -> None:
         d = list(msg.data) if msg.data else []
         now = time.time()
@@ -120,11 +170,54 @@ class Collectors:
             }
             self._joy_t = time.time()
 
+    def _on_imu(self, msg) -> None:
+        now = time.time()
+        o = msg.orientation
+        euler = _quat_to_euler(o.x, o.y, o.z, o.w)
+        la = msg.linear_acceleration
+        av = msg.angular_velocity
+        with self._lock:
+            self._imu = {
+                **euler,
+                "ax": float(la.x),
+                "ay": float(la.y),
+                "az": float(la.z),
+                "gx": float(av.x),
+                "gy": float(av.y),
+                "gz": float(av.z),
+            }
+            self._imu_t = now
+
+    def _on_moon_mode(self, msg) -> None:
+        with self._lock:
+            self._moon_mode = str(msg.data)
+            self._moon_mode_t = time.time()
+
+    def _on_guide_state(self, msg) -> None:
+        with self._lock:
+            self._guide_state = str(msg.data)
+            self._guide_state_t = time.time()
+
+    def _on_voice_cmd(self, msg) -> None:
+        now = time.time()
+        with self._lock:
+            self._last_voice_cmd = str(msg.data)
+            self._last_voice_cmd_t = now
+        self._push_event(f"voice_cmd: {msg.data}")
+
+    def _on_guide_cmd(self, msg) -> None:
+        now = time.time()
+        with self._lock:
+            self._last_guide_cmd = str(msg.data)
+            self._last_guide_cmd_t = now
+        self._push_event(f"guide_cmd: {msg.data}")
+
     def start_ros(self) -> bool:
         try:
             import rospy
             from geometry_msgs.msg import Twist
-            from std_msgs.msg import Float32MultiArray, Int32
+            from sensor_msgs.msg import Imu
+            from std_msgs.msg import Float32MultiArray, Int32, String
             from sim2real_msg.msg import Joy as SimJoy
         except Exception as e:
             self._push_event(f"ROS import failed: {e}")
@@ -137,13 +230,19 @@ class Collectors:
         rospy.Subscriber("/fsm_state", Int32, self._on_fsm, queue_size=2)
         rospy.Subscriber("/cmd_vel", Twist, self._on_cmd, queue_size=5)
         rospy.Subscriber("/joy_msg", SimJoy, self._on_joy, queue_size=5)
+        rospy.Subscriber("/imu/data", Imu, self._on_imu, queue_size=10)
+        rospy.Subscriber("/moon/mode", String, self._on_moon_mode, queue_size=2)
+        rospy.Subscriber("/guide/state", String, self._on_guide_state, queue_size=2)
+        rospy.Subscriber("/moon/voice_cmd", String, self._on_voice_cmd, queue_size=10)
+        rospy.Subscriber("/guide/voice_command", String, self._on_guide_cmd, queue_size=10)
         self._ros_ok = True
-        self._push_event("ROS subscribers ready (read-only)")
+        self._push_event("ROS subscribers ready (read-only + voice chain)")
         return True
 
     def start_log_tail(self) -> None:
-        t = threading.Thread(target=self._log_loop, name="uwb-log-tail", daemon=True)
-        t.start()
+        threading.Thread(target=self._log_loop, name="uwb-log-tail", daemon=True).start()
+        threading.Thread(target=self._mic_poll_loop, name="mic-proxy", daemon=True).start()
+        threading.Thread(target=self._proc_poll_loop, name="proc-poll", daemon=True).start()
 
     def _push_event(self, line: str) -> None:
         with self._lock:
@@ -207,6 +306,28 @@ class Collectors:
                 self._push_event(f"log read err: {e}")
             time.sleep(0.15)
 
+    def _mic_poll_loop(self) -> None:
+        while not self._stop:
+            try:
+                req = urllib.request.Request(MIC_METER_URL, method="GET")
+                with urllib.request.urlopen(req, timeout=1.2) as resp:
+                    data = resp.read().decode("utf-8")
+                mic = __import__("json").loads(data)
+                now = time.time()
+                with self._lock:
+                    self._mic_cache = mic
+                    self._mic_cache_t = now
+            except Exception:
+                pass
+            time.sleep(0.25)
+
+    def _proc_poll_loop(self) -> None:
+        while not self._stop:
+            procs = _scan_processes()
+            with self._lock:
+                self._process_cache = procs
+            time.sleep(2.0)
+
     def snapshot(self) -> Snapshot:
         now = time.time()
         with self._lock:
@@ -215,12 +336,17 @@ class Collectors:
             fsm_age = (now - self._fsm_t) if self._fsm_t else 999.0
             cmd_age = (now - self._cmd_t) if self._cmd_t else 999.0
             joy_age = (now - self._joy_t) if self._joy_t else 999.0
+            imu_age = (now - self._imu_t) if self._imu_t else 999.0
+            mode_age = (now - self._moon_mode_t) if self._moon_mode_t else 999.0
+            guide_age = (now - self._guide_state_t) if self._guide_state_t else 999.0
             stamps = list(self._cmd_stamps)
             hz = 0.0
             if len(stamps) >= 2:
                 dt = stamps[-1] - stamps[0]
                 if dt > 1e-3:
                     hz = (len(stamps) - 1) / dt
+            mic = dict(self._mic_cache) if self._mic_cache else {}
+            mic_age = (now - self._mic_cache_t) if self._mic_cache_t else 999.0
             snap = Snapshot(
                 t=now,
                 obstacle=dict(self._obs),
@@ -236,11 +362,24 @@ class Collectors:
                 cmd_hz=hz,
                 joy_msg=dict(self._joy),
                 joy_age=joy_age,
+                imu=dict(self._imu),
+                imu_age=imu_age,
+                moon_mode=self._moon_mode,
+                moon_mode_age=mode_age,
+                guide_state=self._guide_state,
+                guide_state_age=guide_age,
+                last_voice_cmd=self._last_voice_cmd,
+                last_voice_cmd_t=self._last_voice_cmd_t,
+                last_guide_cmd=self._last_guide_cmd,
+                last_guide_cmd_t=self._last_guide_cmd_t,
+                mic={**mic, "proxy_age": mic_age},
+                processes=dict(self._process_cache),
                 ros_ok=self._ros_ok,
                 events=list(self._events)[:40],
             )
 
         snap.layers = _eval_layers(snap)
+        snap.voice_chain = _eval_voice_chain(snap)
         return snap
 
     def stop(self) -> None:
@@ -256,9 +395,105 @@ def _f(s: str) -> float:
         return float("nan")
 
 
+def _scan_processes() -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, pattern in PROC_PATTERNS.items():
+        try:
+            r = subprocess.run(
+                ["pgrep", "-af", pattern],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+            out[key] = {"running": bool(lines), "lines": lines[:3]}
+        except Exception as e:
+            out[key] = {"running": False, "error": str(e)}
+    return out
+
+
+def _eval_voice_chain(s: Snapshot) -> Dict[str, Any]:
+    """语音 → 模式 → 多模态 链路四段状态。"""
+    mic = s.mic or {}
+    mic_t = float(mic.get("t") or 0)
+    mic_age = s.t - mic_t if mic_t else 999.0
+    listening = bool(mic.get("listening"))
+    rms = float(mic.get("rms") or 0)
+    live_audio = listening and mic_age < 1.5 and rms >= 0.0
+
+    if not s.processes.get("kws_trigger", {}).get("running") and not s.processes.get("kws_brain", {}).get("running"):
+        mic_status = "red"
+        mic_detail = "KWS 未运行"
+    elif live_audio:
+        mic_status = "green"
+        mic_detail = f"开麦 · RMS={rms:.4f}"
+    elif listening and mic_age < 1.5:
+        mic_status = "yellow"
+        mic_detail = "KWS 在跑但电平停滞"
+    else:
+        mic_status = "yellow"
+        mic_detail = "关麦 / 待机"
+
+    hit = mic.get("last_hit") or s.last_guide_cmd or s.last_voice_cmd or ""
+    hit_age = min(
+        s.t - float(mic.get("hit_t") or 0) if mic.get("hit_t") else 999,
+        s.t - s.last_guide_cmd_t if s.last_guide_cmd_t else 999,
+        s.t - s.last_voice_cmd_t if s.last_voice_cmd_t else 999,
+    )
+    if hit and hit_age < 30:
+        kws_status = "green"
+        kws_detail = f"命中: {hit} ({hit_age:.1f}s前)"
+    elif s.processes.get("kws_trigger", {}).get("running") or s.processes.get("kws_brain", {}).get("running"):
+        kws_status = "yellow"
+        kws_detail = "监听中，尚无命中"
+    else:
+        kws_status = "red"
+        kws_detail = "KWS 离线"
+
+    mode = s.moon_mode or "—"
+    if s.moon_mode_age < 5.0 and mode:
+        if mode == "IDLE":
+            mode_status = "yellow"
+            mode_detail = f"模式 IDLE ({s.moon_mode_age:.1f}s)"
+        else:
+            mode_status = "green"
+            mode_detail = f"模式 {mode} ({s.moon_mode_age:.1f}s)"
+    elif s.processes.get("mode_arbiter", {}).get("running"):
+        mode_status = "yellow"
+        mode_detail = "arbiter 在跑，/moon/mode stale"
+    else:
+        mode_status = "red"
+        mode_detail = "mode_arbiter 未运行"
+
+    follow_ok = s.uwb_age < UWB_STALE_SEC or (s.cmd_age < CMD_STALE_SEC and abs(s.cmd_vel.get("vx", 0)) > 0.01)
+    imu_ok = s.imu_age < IMU_STALE_SEC
+    if mode in ("UWB_FOLLOW",) and follow_ok:
+        react_status = "green"
+        react_detail = f"UWB/cmd 活跃 · IMU {'ok' if imu_ok else 'stale'}"
+    elif mode == "FACE_LOOK":
+        react_status = "green"
+        react_detail = "FACE_LOOK 模式"
+    elif s.guide_state and s.guide_state_age < 3.0:
+        react_status = "yellow"
+        react_detail = f"guide: {s.guide_state}"
+    elif follow_ok:
+        react_status = "yellow"
+        react_detail = "有运动输出，模式未确认"
+    else:
+        react_status = "red"
+        react_detail = "无跟随/反应输出"
+
+    return {
+        "mic": {"status": mic_status, "detail": mic_detail, "open": live_audio, "rms": rms},
+        "kws": {"status": kws_status, "detail": kws_detail, "last_hit": hit},
+        "mode": {"status": mode_status, "detail": mode_detail, "value": mode},
+        "react": {"status": react_status, "detail": react_detail},
+        "guide_state": s.guide_state,
+        "guide_state_age": s.guide_state_age,
+    }
+
+
 def _eval_layers(s: Snapshot) -> Dict[str, Any]:
-    """感知 / 决策 / 执行 健康灯。"""
-    # perception
     uwb_ok = s.uwb_age < UWB_STALE_SEC and bool(s.uwb)
     obs_ok = s.obstacle_age < OBS_STALE_SEC and s.obstacle.get("valid", False)
     if uwb_ok and obs_ok:
@@ -280,7 +515,6 @@ def _eval_layers(s: Snapshot) -> Dict[str, Any]:
             "detail": f"UWB age={s.uwb_age:.1f}s obstacle age={s.obstacle_age:.1f}s",
         }
 
-    # decision
     dec = s.decision
     if dec and s.uwb_age < UWB_STALE_SEC:
         gate = str(dec.get("gate", ""))
@@ -292,9 +526,8 @@ def _eval_layers(s: Snapshot) -> Dict[str, Any]:
     elif s.uwb_age < UWB_STALE_SEC:
         decision = {"status": "yellow", "detail": "有 UWB 日志但尚无 MOTION"}
     else:
-        decision = {"status": "red", "detail": "无跟随决策输出（检查 uwb_follow 是否在跑）"}
+        decision = {"status": "red", "detail": "无跟随决策输出"}
 
-    # execution
     fsm = s.fsm_state
     cmd_live = s.cmd_age < CMD_STALE_SEC and s.cmd_hz > 1.0
     if fsm == 8:

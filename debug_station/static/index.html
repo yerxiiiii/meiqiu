@@ -3,17 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Moon Debug Station</title>
+  <title>Moon 语音链路测试</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <header class="top">
     <div>
-      <h1>Moon Debug Station</h1>
-      <p class="sub">只读调试台 · 与跟随/视觉功能代码隔离 · 不发控腿指令</p>
+      <h1>Moon 语音链路测试上位机</h1>
+      <p class="sub">语音关键词 → 模式切换 → IMU / UWB 多模态跟随 · 测试台</p>
     </div>
     <div class="meta" id="meta">connecting…</div>
   </header>
+
+  <!-- ① 语音链路四段状态（含开麦/关麦） -->
+  <section class="chain" id="voice-chain">
+    <div class="chain-step" data-key="mic">
+      <span class="dot"></span>
+      <div><b>① 麦克风</b><small>—</small></div>
+    </div>
+    <div class="chain-arrow">→</div>
+    <div class="chain-step" data-key="kws">
+      <span class="dot"></span>
+      <div><b>② KWS 关键词</b><small>—</small></div>
+    </div>
+    <div class="chain-arrow">→</div>
+    <div class="chain-step" data-key="mode">
+      <span class="dot"></span>
+      <div><b>③ 模式 arbiter</b><small>—</small></div>
+    </div>
+    <div class="chain-arrow">→</div>
+    <div class="chain-step" data-key="react">
+      <span class="dot"></span>
+      <div><b>④ 跟随 / 反应</b><small>—</small></div>
+    </div>
+  </section>
 
   <section class="layers" id="layers">
     <div class="layer" data-key="perception"><span class="dot"></span><div><b>感知层</b><small>—</small></div></div>
@@ -21,58 +44,84 @@
     <div class="layer" data-key="execution"><span class="dot"></span><div><b>执行层</b><small>—</small></div></div>
   </section>
 
-  <main class="grid">
-    <section class="card video">
-      <h2>相机第一视角 (FPV)</h2>
-      <p class="hint">画面经本页 <code>/fpv/stream.mjpg</code> 代理（只需开 8090）；按钮启停 ZED Mini</p>
-      <div class="zed-controls">
-        <button type="button" id="btn-zed-on" class="btn btn-on">开启 ZED</button>
-        <button type="button" id="btn-zed-off" class="btn btn-off">关闭 ZED</button>
-        <span id="zed-status" class="zed-status">状态: —</span>
-      </div>
-      <img id="fpv" alt="FPV" />
-      <p class="hint" id="fpv-link"></p>
-      <p class="hint" id="zed-msg"></p>
-    </section>
+  <main class="layout">
+    <!-- 左列：终端 + 常用命令 -->
+    <div class="col-left">
+      <section class="card terminal-card">
+        <h2>命令终端</h2>
+        <p class="hint">
+          支持 <code>voice uwb_follow</code> · <code>guide 小派跟我走</code> ·
+          <code>ros /moon/voice_cmd stop</code> · 白名单 shell（如 <code>rostopic echo /fsm_state -n 1</code>）
+        </p>
+        <pre id="terminal-out" class="terminal-out"></pre>
+        <form id="terminal-form" class="terminal-form">
+          <span class="prompt">$</span>
+          <input id="terminal-in" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="输入命令后 Enter…" />
+          <button type="submit" class="btn">执行</button>
+        </form>
+      </section>
 
-    <section class="card">
-      <h2>感知 · 障碍 /moon/obstacle</h2>
-      <div class="bars" id="obs-bars"></div>
-      <pre id="obs-json" class="mono">—</pre>
-    </section>
+      <section class="card quick-card">
+        <h2>常用命令</h2>
+        <p class="hint">一键 ROS 发布 / 填入终端 / 后台启动脚本</p>
+        <div id="quick-buttons" class="quick-groups"></div>
+      </section>
 
-    <section class="card">
-      <h2>感知 · UWB（来自跟随日志，不占串口）</h2>
-      <div class="kv" id="uwb-kv"></div>
-      <pre id="uwb-json" class="mono">—</pre>
-    </section>
+      <section class="card">
+        <h2>进程状态</h2>
+        <div id="proc-list" class="proc-list"></div>
+      </section>
+    </div>
 
-    <section class="card">
-      <h2>决策 · 跟随输出</h2>
-      <div class="kv" id="dec-kv"></div>
-      <pre id="dec-json" class="mono">—</pre>
-    </section>
+    <!-- 右列：IMU + 流程详情 + 感知 -->
+    <div class="col-right">
+      <section class="card imu-card">
+        <h2>IMU · /imu/data</h2>
+        <div class="imu-grid" id="imu-grid"></div>
+        <div class="imu-bars" id="imu-bars"></div>
+        <pre id="imu-json" class="mono">—</pre>
+      </section>
 
-    <section class="card">
-      <h2>执行 · cmd_vel / fsm / joy_msg</h2>
-      <div class="kv" id="exec-kv"></div>
-      <pre id="exec-json" class="mono">—</pre>
-    </section>
+      <section class="card">
+        <h2>流程状态 · 模式 / 带路 / 麦克</h2>
+        <div class="kv" id="flow-kv"></div>
+        <div class="mic-meter">
+          <div class="mic-track"><div class="mic-fill" id="mic-fill"></div></div>
+          <span class="mic-label" id="mic-label">RMS —</span>
+        </div>
+      </section>
 
-    <section class="card wide">
-      <h2>日志 · 最新 uwb_follow 会话</h2>
-      <pre id="log" class="mono log"></pre>
-    </section>
+      <section class="card">
+        <h2>感知 · UWB / 障碍</h2>
+        <div class="kv" id="sense-kv"></div>
+      </section>
 
-    <section class="card wide">
-      <h2>事件流</h2>
-      <pre id="events" class="mono log"></pre>
-    </section>
+      <section class="card">
+        <h2>执行 · cmd_vel / fsm</h2>
+        <div class="kv" id="exec-kv"></div>
+      </section>
+
+      <section class="card video">
+        <h2>FPV（可选）</h2>
+        <div class="zed-controls">
+          <button type="button" id="btn-zed-on" class="btn btn-on">开启 ZED</button>
+          <button type="button" id="btn-zed-off" class="btn btn-off">关闭 ZED</button>
+          <span id="zed-status" class="zed-status">—</span>
+        </div>
+        <img id="fpv" alt="FPV" />
+      </section>
+
+      <section class="card">
+        <h2>事件流</h2>
+        <pre id="events" class="mono log"></pre>
+      </section>
+    </div>
   </main>
 
   <footer>
-    <span>刷新 5Hz · API <code>/api/snapshot</code></span>
-    <span>深度伪彩图：P1（当前用障碍三区数值代替）</span>
+    <span>刷新 5Hz · <code>:8090</code> 测试台 · 麦克电平 <code>:8091</code></span>
+    <span>终端 POST <code>/api/cmd</code></span>
   </footer>
   <script src="/app.js"></script>
 </body>

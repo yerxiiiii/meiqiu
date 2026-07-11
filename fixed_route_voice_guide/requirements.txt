@@ -1,0 +1,7 @@
+# Mini Pi Plus 固定场地语音带路 demo
+# 路径: /home/nvidia/moon/fixed_route_voice_guide
+
+PyYAML>=5.4
+# 里程碑 3 再装:
+# vosk
+# sounddevice

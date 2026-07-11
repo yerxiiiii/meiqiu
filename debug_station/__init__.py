@@ -1,1 +1,1 @@
-# Moon debug station package (read-only).
+# Moon debug station — read-only observation + voice-chain test UI
