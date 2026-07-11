@@ -1,0 +1,71 @@
+service_name: "/model_output"
+y_service_name_suffix: "_y"
+
+algorithm: "lr"
+
+motor_group: "lowerBody"
+
+dofs: 12
+
+# 0~11   robotState position
+# 12~23  robotState velocity
+# 24~26  robotState base_ang_vel 
+# 27~29  robotState base_ang_vel 
+# 30~32  command    x y z
+# 33~36  joy        X Y A B
+num_single_obs: 37
+
+frame_stack: 1
+
+cmd_lin_vel_scale: 1.0
+cmd_ang_vel_scale: 1.0
+rbt_lin_pos_scale: 1.0
+rbt_lin_vel_scale: 1.0
+rbt_ang_vel_scale: 1.0
+
+cmd_vel_x_min:   -0.70
+cmd_vel_x_max:    1.70
+cmd_vel_y_min:   -0.70
+cmd_vel_y_max:    0.70
+cmd_vel_yaw_min: -1.50
+cmd_vel_yaw_max:  1.50
+
+
+normal_mode: [0, 0]   # 正常模式：不改变步频和步幅
+fast_mode: [3, 1]    # 加快模式：增加步频3次，增加步幅1次
+
+clip_obs: 18.0
+
+pd_ctrl_f: 1000 
+rl_ctrl_f: 50
+
+action_scale: 1.0
+
+joint_names: [ 
+'l_ankle_roll_joint', 'l_ankle_pitch_joint', 'l_calf_joint', 'l_thigh_joint', 'l_hip_roll_joint', 'l_hip_pitch_joint',
+'r_ankle_roll_joint', 'r_ankle_pitch_joint', 'r_calf_joint', 'r_thigh_joint', 'r_hip_roll_joint', 'r_hip_pitch_joint']
+
+# policy顺序
+clip_actions_lower: [-3, -3, -3, -3, -3, -3,
+                     -3, -3, -3, -3, -3, -3 ]
+clip_actions_upper: [ 3,  3,  3,  3,  3,  3,
+                      3,  3,  3,  3,  3,  3 ]
+
+# clip_output_lower:  [-0.30, -0.75, -1.30, -0.60, -0.40, -1.00,
+#                      -0.30, -0.75, -1.30, -0.60, -0.40, -1.00]
+# clip_output_upper: [  0.30,  0.75,  1.30,  0.60,  0.40,  1.00,
+#                       0.30,  0.75,  1.30,  0.60,  0.40,  1.00]
+#
+clip_output_lower:  [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14,
+                     -3.14, -3.14, -3.14, -3.14, -3.14, -3.14]
+clip_output_upper: [  3.14,  3.14,  3.14,  3.14,  3.14,  3.14,
+                      3.14, 3.14, 3.14, 3.14, 3.14, 3.14 ]
+
+kp: [80,80,80,80,80,80,
+     80,80,80,80,80,80]
+kd: [1.1, 1.1, 1.1, 1.1, 1.1, 1.1 ,
+     1.1, 1.1, 1.1, 1.1, 1.1, 1.1 ]
+
+urdf_offset: [0.00, -0.40, 0.65, 0.00, 0.00, -0.25,
+              0.00, -0.40, 0.65, 0.00, 0.00, -0.25,]
+
