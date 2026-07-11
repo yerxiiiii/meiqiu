@@ -15,7 +15,7 @@ HighTorque Pi Plus UWB 自主跟随系统 - 最终版 (支持热插拔 + 开机�
 
 运行方式：
   手动运行：
-    source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+    source ~/sim2real/install/setup.bash   # or: export SIM2REAL_WS=...
     python3 /home/nvidia/moon/uwb_follow.py
 
   开机自启 (systemd 服务)：
@@ -48,6 +48,11 @@ import logging
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, Tuple
+
+# moon repo root on sys.path for common.sim2real_env
+_MOON = os.path.dirname(os.path.abspath(__file__))
+if _MOON not in sys.path:
+    sys.path.insert(0, _MOON)
 
 # 视觉安全门控（与 ZED 节点解耦：只订 /moon/obstacle）
 _VISION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vision")
@@ -429,10 +434,18 @@ def try_open_serial(port: str) -> Optional[serial.Serial]:
 CMD_VEL_X_SCALE = 1.5
 CMD_VEL_YAW_SCALE = 1.57
 
-JOY_TELEOP_SETUP = (
-    "source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash && "
-    "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
-)
+def _joy_teleop_setup() -> str:
+    try:
+        from common.sim2real_env import joy_teleop_restore_cmd
+        return joy_teleop_restore_cmd()
+    except Exception:
+        return (
+            "source /home/nvidia/sim2real/install/setup.bash && "
+            "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
+        )
+
+
+JOY_TELEOP_SETUP = _joy_teleop_setup()
 
 
 def kill_joy_teleop() -> None:

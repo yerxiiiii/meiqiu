@@ -96,7 +96,7 @@ sim2real 仅在 **RUNNING** 时接收速度指令。默认 `AUTO_ENTER_RUNNING =
 ### 启动
 
 ```bash
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/uwb_follow.py
 ```
 

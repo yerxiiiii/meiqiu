@@ -30,7 +30,7 @@ guide/
 ## 快速验证
 
 ```bash
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 
 # 1) dry-run（不控机器人）
 ./scripts/run_dry_run.sh

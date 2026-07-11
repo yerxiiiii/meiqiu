@@ -19,7 +19,7 @@
 ## 运行（干跑）
 
 ```bash
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 
 # 终端 1
 python3 /home/nvidia/moon/brain/mode_arbiter.py --dry-run --no-camera-manage

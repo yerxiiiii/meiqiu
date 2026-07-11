@@ -18,7 +18,15 @@ os.makedirs(DIR, exist_ok=True)
 open("/tmp/follow_debug_dir.txt", "w").write(DIR + "\n")
 STOP = os.path.join(DIR, "STOP")
 
-SETUP = "source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash"
+SETUP = None
+try:
+    sys.path.insert(0, "/home/nvidia/moon")
+    from common.sim2real_env import source_setup_cmd
+
+    SETUP = source_setup_cmd()
+except Exception:
+    SETUP = "source /home/nvidia/sim2real/install/setup.bash"
+
 
 procs = []
 

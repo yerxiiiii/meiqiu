@@ -17,7 +17,20 @@ from typing import Any, Dict, List, Optional
 
 MOON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ZED_SCRIPT = os.path.join(MOON_ROOT, "vision", "zed_obstacle_node.py")
-SETUP_BASH = "/home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash"
+SETUP_BASH = None
+try:
+    import sys
+    from pathlib import Path
+
+    _MOON = str(Path(__file__).resolve().parents[1])
+    if _MOON not in sys.path:
+        sys.path.insert(0, _MOON)
+    from common.sim2real_env import resolve_setup_bash
+
+    SETUP_BASH = str(resolve_setup_bash())
+except Exception:
+    SETUP_BASH = "/home/nvidia/sim2real/install/setup.bash"
+
 LOG_DIR = os.path.join(MOON_ROOT, "logs")
 ZED_OUT_LOG = os.path.join(LOG_DIR, "zed_obstacle_debug_station.log")
 

@@ -20,7 +20,7 @@ KWS 模型目录：
 ## 模拟（不启麦）
 
 ```bash
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/voice/voice_sim.py
 # 1=看我  2=我们走  0=停止
 python3 /home/nvidia/moon/voice/kws_node.py --text "小派我们走"
@@ -29,7 +29,7 @@ python3 /home/nvidia/moon/voice/kws_node.py --text "小派我们走"
 ## Sherpa 离线 KWS（接麦）
 
 ```bash
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 
 # 决策侧需常驻（语音只发话题，不启 uwb_follow.py）
 # python3 /home/nvidia/moon/brain/mode_arbiter.py

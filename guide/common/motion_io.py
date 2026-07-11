@@ -8,12 +8,28 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 import rospy
 from geometry_msgs.msg import Twist
 from sim2real_msg.msg import Joy as SimJoy
+
+_MOON = str(Path(__file__).resolve().parents[1])
+if _MOON not in sys.path:
+    sys.path.insert(0, _MOON)
+
+try:
+    from common.sim2real_env import joy_teleop_restore_cmd
+
+    JOY_TELEOP_SETUP = joy_teleop_restore_cmd()
+except Exception:
+    JOY_TELEOP_SETUP = (
+        "source /home/nvidia/sim2real/install/setup.bash && "
+        "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
+    )
 
 # 与 joy.yaml / uwb_follow 一致
 CMD_VEL_X_SCALE = 1.5
@@ -22,11 +38,6 @@ CMD_VEL_YAW_SCALE = 1.57
 # 带路保守上限（m/s, rad/s）
 MAX_LINEAR_X = 0.12
 MAX_ANGULAR_Z = 0.25
-
-JOY_TELEOP_SETUP = (
-    "source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash && "
-    "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
-)
 
 
 def kill_joy_teleop() -> None:

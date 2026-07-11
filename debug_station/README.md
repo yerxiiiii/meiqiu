@@ -19,15 +19,15 @@ moon/
 
 ```bash
 # 终端 A（可选）：视觉 FPV + /moon/obstacle
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/vision/zed_obstacle_node.py
 
 # 终端 B（可选）：UWB 跟随（写 logs + 发 cmd_vel）
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/uwb_follow.py
 
 # 终端 C：调试台
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/debug_station/server.py
 ```
 

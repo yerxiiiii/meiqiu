@@ -32,7 +32,7 @@ from std_msgs.msg import Float32MultiArray, String
 _BRAIN = os.path.dirname(os.path.abspath(__file__))
 _MOON = os.path.dirname(_BRAIN)
 _VISION = os.path.join(_MOON, "vision")
-for p in (_BRAIN, _VISION):
+for p in (_MOON, _BRAIN, _VISION):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -244,10 +244,14 @@ class ModeArbiter:
     def _restore_teleop(self) -> None:
         import subprocess
 
-        setup = (
-            "source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash && "
-            "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
-        )
+        try:
+            from common.sim2real_env import joy_teleop_restore_cmd
+            setup = joy_teleop_restore_cmd()
+        except Exception:
+            setup = (
+                "source /home/nvidia/sim2real/install/setup.bash && "
+                "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
+            )
         subprocess.Popen(
             ["bash", "-c", setup],
             stdout=subprocess.DEVNULL,

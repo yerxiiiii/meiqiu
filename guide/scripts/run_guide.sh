@@ -2,7 +2,11 @@
 # 实机带路：请先确认 RUNNING，并停掉 uwb-follow
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+MOON_ROOT="$(cd "$ROOT/.." && pwd)"
+# Prefer ~/sim2real (symlink ok). Override: export SIM2REAL_WS=...
+# shellcheck source=/dev/null
+source "${MOON_ROOT}/scripts/sim2real_env.sh"
+moon_source_sim2real
 
 if systemctl is-active --quiet uwb-follow.service 2>/dev/null; then
   echo "[WARN] uwb-follow.service 仍在运行，建议: sudo systemctl stop uwb-follow.service"

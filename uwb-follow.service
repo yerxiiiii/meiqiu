@@ -10,7 +10,8 @@ Group=nvidia
 Environment="HOME=/home/nvidia"
 Environment="ROS_MASTER_URI=http://localhost:11311"
 Environment="ROS_HOSTNAME=localhost"
-ExecStart=/bin/bash -c "source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash && python3 -u /home/nvidia/moon/uwb_follow.py"
+# Optional: Environment="SIM2REAL_WS=/path/to/your/sim2real"
+ExecStart=/bin/bash -c "source /home/nvidia/moon/scripts/sim2real_env.sh && moon_source_sim2real && python3 -u /home/nvidia/moon/uwb_follow.py"
 Restart=always
 RestartSec=5
 StandardOutput=journal

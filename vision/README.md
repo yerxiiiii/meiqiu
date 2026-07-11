@@ -57,11 +57,11 @@
 
 ```bash
 # 终端 1：视觉（需 ZED 已接好）
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/vision/zed_obstacle_node.py
 
 # 终端 2：跟随（会自动订 /moon/obstacle）
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+source /home/nvidia/sim2real/install/setup.bash
 python3 /home/nvidia/moon/uwb_follow.py
 ```
 

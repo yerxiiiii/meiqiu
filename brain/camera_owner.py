@@ -6,15 +6,22 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from typing import Optional
 
 from modes import Mode
 
-MOON_DIR = "/home/nvidia/moon"
-ROS_SETUP = (
-    "source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash"
-)
+MOON_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if MOON_DIR not in sys.path:
+    sys.path.insert(0, MOON_DIR)
+
+try:
+    from common.sim2real_env import source_setup_cmd
+
+    ROS_SETUP = source_setup_cmd()
+except Exception:
+    ROS_SETUP = "source /home/nvidia/sim2real/install/setup.bash"
 
 FACE_OBS_SCRIPT = os.path.join(MOON_DIR, "vision", "face_obs_node.py")
 ZED_OBS_SCRIPT = os.path.join(MOON_DIR, "vision", "zed_obstacle_node.py")

@@ -59,7 +59,7 @@ amp  →  amp_right_hold  →  lr  →  footstep
 # 确保没有残留双 launch
 pkill -f 'roslaunch sim2real_master' || true
 
-cd /home/nvidia/sim2real_master-feature-master_and_slave
+cd /home/nvidia/sim2real
 source ./install/setup.bash
 roslaunch sim2real_master joy_control_pi_plus_orin.launch
 ```

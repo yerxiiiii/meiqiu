@@ -19,6 +19,12 @@ import tty
 import subprocess
 import time
 import threading
+from pathlib import Path
+
+# moon repo root for common.sim2real_env
+_MOON = str(Path(__file__).resolve().parent)
+if _MOON not in sys.path:
+    sys.path.insert(0, _MOON)
 
 msg = """
 ---------------------------------------------
@@ -156,8 +162,16 @@ if __name__ == "__main__":
         
         # 恢复机器人手柄节点
         print("\n正在恢复默认的 joy_teleop 节点...")
+        try:
+            from common.sim2real_env import joy_teleop_restore_cmd
+            restore_cmd = joy_teleop_restore_cmd()
+        except Exception:
+            restore_cmd = (
+                "source /home/nvidia/sim2real/install/setup.bash && "
+                "roslaunch sim2real_master joy_teleop.launch use_filter:=true &"
+            )
         subprocess.Popen(
-            ['bash', '-c', 'source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash && roslaunch sim2real_master joy_teleop.launch use_filter:=true &'],
+            ['bash', '-c', restore_cmd],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         print("已退出键盘控制模式。")

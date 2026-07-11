@@ -8,7 +8,11 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/moon_kws_boot.log"
 echo "[moon-kws] $(date) boot wrapper enter" >>"$LOG_FILE"
 
-source /home/nvidia/sim2real_master-feature-master_and_slave/install/setup.bash
+# Prefer ~/sim2real (symlink ok). Override: export SIM2REAL_WS=...
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../scripts/sim2real_env.sh" 2>/dev/null \
+  || source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/sim2real_env.sh"
+moon_source_sim2real
 
 export HOME=/home/nvidia
 export ROS_MASTER_URI="${ROS_MASTER_URI:-http://localhost:11311}"
